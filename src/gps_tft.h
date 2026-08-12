@@ -7,9 +7,10 @@
 
 #include <stdio.h>
 #include <pico/stdlib.h>
+#include <pico/critical_section.h>
 #include <hardware/gpio.h>
 #include <hardware/uart.h>
-
+#include <queue>
 #include <memory>
 
 #include "timemgr.h"
@@ -31,7 +32,7 @@ class GPS_TFT
 public:
     typedef std::shared_ptr<GPS_TFT> Shared;
 
-    GPS_TFT(ILI_TFT::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED, TimeMgr::Shared spTimeMgr);
+    GPS_TFT(ILI_TFT::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED);
     ~GPS_TFT();
 
     void Initialize();
@@ -51,15 +52,22 @@ private:
                        float elrad,
                        float azrad,
                        uint satRadius,
-                       uint16_t color     = COLOUR_WHITE,
+                       uint16_t color = COLOUR_WHITE,
                        uint16_t fillColor = COLOUR_WHITE);
     int linePos(int nLine);
     void drawText(int nLine, std::string strText, uint16_t color = COLOUR_WHITE, bool bRightAlign = true, uint nPadding = 0);
 
     // Font management - delegates to m_spDisplay
-    void SetFont(const BitmapFont* pFont) { if (m_spDisplay) m_spDisplay->SetFont(pFont); }
-    const BitmapFont* GetFont() const { return m_spDisplay ? m_spDisplay->GetFont() : nullptr; }
-    
+    void SetFont(const BitmapFont* pFont)
+    {
+        if (m_spDisplay)
+            m_spDisplay->SetFont(pFont);
+    }
+    const BitmapFont* GetFont() const
+    {
+        return m_spDisplay ? m_spDisplay->GetFont() : nullptr;
+    }
+
     // Get current font dimensions dynamically from display's font
     inline uint getCharWidth() const
     {
@@ -80,7 +88,8 @@ private:
     ILI_TFT::Shared m_spDisplay;
     GPS::Shared m_spGPS;
     LED::Shared m_spLED;
-    GPSData::Shared m_spGPSData;
-    TimeMgr::Shared m_spTimeMgr;
+    GPSData::Shared m_spGPSData;            // Current data being used for display
+    std::queue<GPSData::Shared> m_qGPSData; // Queue of GPS data to be processed by the display loop
     uint64_t m_nLastTimeSyncAttemptSec;
+    critical_section m_GpsDataCallbackCS; // Protects access to GPS data queue
 };

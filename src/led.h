@@ -11,10 +11,10 @@
 #include <memory>
 
 #if PICO_DEFAULT_LED_PIN_INVERTED
-auto constexpr LED_ON  = 0;
+auto constexpr LED_ON = 0;
 auto constexpr LED_OFF = 1;
 #else
-auto constexpr LED_ON  = 1;
+auto constexpr LED_ON = 1;
 auto constexpr LED_OFF = 0;
 #endif
 
@@ -32,16 +32,16 @@ static inline constexpr uint32_t urgb_u32(uint8_t r, uint8_t g, uint8_t b)
 }
 
 auto constexpr led_white = urgb_u32(0x80, 0x80, 0x80);
-auto constexpr led_on    = urgb_u32(0x80, 0x80, 0x80);
+auto constexpr led_on = urgb_u32(0x80, 0x80, 0x80);
 auto constexpr led_black = urgb_u32(0, 0, 0);
-auto constexpr led_off   = urgb_u32(0, 0, 0);
+auto constexpr led_off = urgb_u32(0, 0, 0);
 
-auto constexpr led_red     = urgb_u32(0x80, 0, 0);
-auto constexpr led_green   = urgb_u32(0, 0x80, 0);
-auto constexpr led_blue    = urgb_u32(0, 0, 0x80);
-auto constexpr led_cyan    = urgb_u32(0, 0x80, 0x80);
+auto constexpr led_red = urgb_u32(0x80, 0, 0);
+auto constexpr led_green = urgb_u32(0, 0x80, 0);
+auto constexpr led_blue = urgb_u32(0, 0, 0x80);
+auto constexpr led_cyan = urgb_u32(0, 0x80, 0x80);
 auto constexpr led_magenta = urgb_u32(0x80, 0, 0x80);
-auto constexpr led_yellow  = urgb_u32(0x80, 0x80, 0);
+auto constexpr led_yellow = urgb_u32(0x80, 0x80, 0);
 
 
 class LED
@@ -52,24 +52,25 @@ public:
     LED() {};
     virtual ~LED();
 
-    virtual void Initialize()                       = 0;
-    virtual void On()                               = 0;
-    virtual void Off()                              = 0;
+    virtual void Initialize() = 0;
+    virtual void On() = 0;
+    virtual void Off() = 0;
     virtual void SetPixel(uint idx, uint32_t color) = 0;
     virtual void SetIgnore(std::vector<uint32_t> vIgnore) {};
     void Blink_ms(uint duration = 50, uint32_t color = led_white);
 
 protected:
-    repeating_timer_t m_LedTimer;
+    repeating_timer_t m_LedTimer {};
 };
 
 class LED_pico : public LED
 {
 public:
     LED_pico(uint pin);
+    LED_pico();
     virtual ~LED_pico();
 
-    void Initialize() override {};
+    void Initialize() override;
     void On() override;
     void Off() override;
     void SetPixel(uint idx, uint32_t color) override;
@@ -107,7 +108,8 @@ public:
     LED_pico_w(uint pin);
     virtual ~LED_pico_w();
 
-    void On();
-    void Off();
+    void Initialize() override;
+    void On() override;
+    void Off() override;
 };
 #endif

@@ -54,26 +54,28 @@ static std::map<std::string, eSentenceType> g_SentenceTypeMap = {
     {"$PCD",   kPCD  },
 };
 
-static GPS* sg_pGPS          = NULL;
+static GPS* sg_pGPS = NULL;
 static uart_inst_t* sg_pUART = nullptr;
 
 // Static members for RX
-char GPS::sm_szBuffer[GPS_BUFSIZE];
-volatile size_t GPS::sm_iHead      = 0;
-volatile size_t GPS::sm_iNext      = 0;
-volatile size_t GPS::sm_nSentences = 0;
+volatile char GPS::sm_szBuffer[GPS_BUFSIZE];
+volatile size_t GPS::sm_iNext = 0;
+std::queue<std::string> GPS::sm_qSentences;
 
 GPS::GPS(uart_inst_t* pUART0, uart_inst_t* pUART1)
     : m_pUART0(pUART0),
       m_pUART1(pUART1),
-      m_bExit(false),
-      m_bGSVInProgress(false),
-      m_nSatListTime(0),
-      m_bSendGpsData(false),
-      m_pSentenceCallBack(nullptr),
-      m_pSentenceCtx(nullptr),
-      m_pGpsDataCallback(nullptr),
-      m_pGpsDataCtx(nullptr)
+      m_spSendGpsDataTimer(std::make_unique<AlarmTimer>([this]() {
+          m_nLastSendTimerFireMs = to_ms_since_boot(get_absolute_time());
+          m_bTuneSendDelayPending = true;
+          if (m_nLastGprmcRxMs < m_nLastGpggaRxMs)
+          {
+              m_bTimerFiredBeforeGprmc = true;
+              m_bSendGpsDataDeferredUntilGprmc = true;
+              return;
+          }
+          m_bSendGpsData = true;
+      }))
 {
 }
 
@@ -83,22 +85,22 @@ GPS::~GPS()
 
 void GPS::SetSentenceCallback(void* pCtx, sentenceCallback pCB)
 {
-    m_pSentenceCtx      = pCtx;
+    m_pSentenceCtx = pCtx;
     m_pSentenceCallBack = pCB;
 }
 
 void GPS::SetGpsDataCallback(void* pCtx, gpsDataCallback pCB)
 {
-    m_pGpsDataCtx      = pCtx;
+    m_pGpsDataCtx = pCtx;
     m_pGpsDataCallback = pCB;
 }
 
 void GPS::Run()
 {
     // Set up GPS
-    uart_set_fifo_enabled(m_pUART0, true);
-    sg_pGPS     = this; // Allow interrupt handler to call us back
-    sg_pUART    = m_pUART0;
+    uart_set_fifo_enabled(m_pUART0, false); // Disable FIFO to get immediate RX interrupts
+    sg_pGPS = this;                         // Allow interrupt handler to call us back
+    sg_pUART = m_pUART0;
     int uartIRQ = m_pUART0 == uart0 ? UART0_IRQ : UART1_IRQ;
     // Set up and enable the interrupt handler
     irq_set_exclusive_handler(uartIRQ, on_uart_rx);
@@ -137,6 +139,7 @@ void GPS::Run()
 
         if (m_bSendGpsData)
         {
+            tuneSendGpsDataDelay();
             m_bSendGpsData = false;
             if (NULL != m_pGpsDataCallback)
             {
@@ -163,7 +166,7 @@ bool GPS::processSentence(std::string strSentence)
     if (!m_spGPSData)
     {
         // Guarantee we have an object to update
-        m_spGPSData           = std::make_shared<GPSData>();
+        m_spGPSData = std::make_shared<GPSData>();
         m_spGPSData->mSatList = m_mSatListPersistent; // restore any previous data
     }
 
@@ -209,7 +212,12 @@ bool GPS::processSentence(std::string strSentence)
     {
     case kGPGGA: // Global Positioning System Fix Data
     {
-        m_bSendGpsData = true;
+        m_nLastGpggaRxMs = to_ms_since_boot(get_absolute_time());
+        if (m_spSendGpsDataTimer)
+        {
+            m_spSendGpsDataTimer->Start(m_nSendGpsDataDelayMs);
+        }
+
         if (!vElems[7].empty())
         {
             m_spGPSData->strNumSats = "Sat: " + vElems[7];
@@ -261,7 +269,7 @@ bool GPS::processSentence(std::string strSentence)
         if (vElems[2] == "1")
         {
             m_mSatListIncoming.clear();
-            m_strNumGSV      = vElems[1];
+            m_strNumGSV = vElems[1];
             m_bGSVInProgress = true;
         }
         int nNumSatsInGSV = std::min(4, atoi(vElems[3].c_str()) - 4 * (atoi(vElems[2].c_str()) - 1));
@@ -271,35 +279,45 @@ bool GPS::processSentence(std::string strSentence)
             {
                 if (!vElems[i].empty() && !vElems[i + 1].empty() && !vElems[i + 2].empty())
                 {
-                    uint num        = atoi(vElems[i].c_str());
-                    uint el         = atoi(vElems[i + 1].c_str());
-                    uint az         = atoi(vElems[i + 2].c_str());
-                    uint rssi       = vElems[i + 3].empty() ? 0 : atoi(vElems[i + 3].c_str());
+                    uint num = atoi(vElems[i].c_str());
+                    uint el = atoi(vElems[i + 1].c_str());
+                    uint az = atoi(vElems[i + 2].c_str());
+                    uint rssi = vElems[i + 3].empty() ? 0 : atoi(vElems[i + 3].c_str());
                     uint rssiScaled = (uint)(std::sqrt((double)rssi / 99.0) * 99.0);
                     m_mSatListIncoming.emplace(std::make_pair(num, SatInfo(num, el, az, rssiScaled)));
                 }
             }
             if (vElems[2] == m_strNumGSV) // Last one received
             {
-                m_bGSVInProgress      = false;
-                m_nSatListTime        = time_us_64();
+                m_bGSVInProgress = false;
+                m_nSatListTime = time_us_64();
                 m_spGPSData->mSatList = m_mSatListIncoming;
-                m_mSatListPersistent  = m_spGPSData->mSatList; // Persist the list
+                m_mSatListPersistent = m_spGPSData->mSatList; // Persist the list
             }
         }
         break;
     }
     case kGPRMC: // Recommended minimum specific GPS/Transit data
     {
+        m_nLastGprmcRxMs = to_ms_since_boot(get_absolute_time());
+        if (m_bSendGpsDataDeferredUntilGprmc)
+        {
+            m_bSendGpsDataDeferredUntilGprmc = false;
+            if (m_spSendGpsDataTimer)
+            {
+                // Timer fired before GPRMC for this cycle; send shortly after GPRMC to avoid stale UI updates.
+                m_spSendGpsDataTimer->Start(10);
+            }
+        }
         if (!vElems[1].empty())
         {
-            std::string& t             = vElems[1];
-            m_spGPSData->strGPSTime    = t.substr(0, 2) + ":" + t.substr(2, 2) + ":" + t.substr(4, 2) + "Z";
+            std::string& t = vElems[1];
+            m_spGPSData->strGPSTime = t.substr(0, 2) + ":" + t.substr(2, 2) + ":" + t.substr(4, 2) + "Z";
             m_spGPSData->strGPSTimeRaw = t;
         }
         else
         {
-            m_spGPSData->strGPSTime    = "";
+            m_spGPSData->strGPSTime = "";
             m_spGPSData->strGPSTimeRaw.clear();
         }
 
@@ -317,13 +335,13 @@ bool GPS::processSentence(std::string strSentence)
             if (!vElems[3].empty() && !vElems[4].empty() && !vElems[5].empty() && !vElems[6].empty())
             {
                 m_spGPSData->bHasPosition = true;
-                m_spGPSData->strLatitude  = convertToDegrees(vElems[3], 7) + vElems[4];
+                m_spGPSData->strLatitude = convertToDegrees(vElems[3], 7) + vElems[4];
                 m_spGPSData->strLongitude = convertToDegrees(vElems[5], 8) + vElems[6];
             }
             if (!vElems[7].empty())
             {
                 double dKnots = std::stod(vElems[7].c_str());
-                double dMph   = dKnots * 1.15078;
+                double dMph = dKnots * 1.15078;
                 std::stringstream oss;
                 if (dMph < 10.0)
                 {
@@ -372,6 +390,98 @@ bool GPS::processSentence(std::string strSentence)
     return true;
 }
 
+void GPS::tuneSendGpsDataDelay()
+{
+    if (!m_bTuneSendDelayPending)
+    {
+        return;
+    }
+    m_bTuneSendDelayPending = false;
+
+    constexpr uint32_t kTargetAfterGpggaMs = 700;
+    constexpr uint32_t kPreGprmcStepMs = 25;
+    constexpr uint32_t kRecoveryStepMs = 1;
+    constexpr uint32_t kRecoveryWindowCycles = 20;
+    constexpr uint32_t kMinDelayMs = 50;
+    constexpr uint32_t kMaxDelayMs = 1200;
+#if !defined(NDEBUG)
+    static uint32_t s_tuneLogCounter = 0;
+    static uint32_t s_deferredCountInWindow = 0;
+    static uint32_t s_deferredWindowStartMs = to_ms_since_boot(get_absolute_time());
+#endif
+    static uint32_t s_noEarlyFireCycles = 0;
+
+#if !defined(NDEBUG)
+
+    const uint32_t nowMs = to_ms_since_boot(get_absolute_time());
+    if (nowMs - s_deferredWindowStartMs >= 60000)
+    {
+        LogInfo("GPS delay tune: deferred_count_last_min=" + std::to_string(s_deferredCountInWindow));
+        s_deferredCountInWindow = 0;
+        s_deferredWindowStartMs = nowMs;
+    }
+#endif
+
+    // If the timer fired before this cycle's GPRMC, shift base delay later.
+    if (m_bTimerFiredBeforeGprmc)
+    {
+        m_bTimerFiredBeforeGprmc = false;
+        s_noEarlyFireCycles = 0;
+#if !defined(NDEBUG)
+        ++s_deferredCountInWindow;
+#endif
+        if (m_nSendGpsDataDelayMs + kPreGprmcStepMs > kMaxDelayMs)
+        {
+            m_nSendGpsDataDelayMs = kMaxDelayMs;
+        }
+        else
+        {
+            m_nSendGpsDataDelayMs += kPreGprmcStepMs;
+        }
+#if !defined(NDEBUG)
+        if ((++s_tuneLogCounter % 10) == 0)
+        {
+            LogInfo("GPS delay tune: deferred until GPRMC, delay_ms=" + std::to_string(m_nSendGpsDataDelayMs) +
+                    ", target_after_gpgga_ms=" + std::to_string(kTargetAfterGpggaMs));
+        }
+#endif
+        return;
+    }
+
+    ++s_noEarlyFireCycles;
+    int32_t adjustmentMs = 0;
+    if (m_nSendGpsDataDelayMs < kTargetAfterGpggaMs)
+    {
+        adjustmentMs = static_cast<int32_t>(kRecoveryStepMs);
+    }
+    else if (m_nSendGpsDataDelayMs > kTargetAfterGpggaMs && s_noEarlyFireCycles >= kRecoveryWindowCycles)
+    {
+        adjustmentMs = -static_cast<int32_t>(kRecoveryStepMs);
+        s_noEarlyFireCycles = 0;
+    }
+
+    int32_t newDelayMs = static_cast<int32_t>(m_nSendGpsDataDelayMs) + adjustmentMs;
+    if (newDelayMs < static_cast<int32_t>(kMinDelayMs))
+    {
+        newDelayMs = static_cast<int32_t>(kMinDelayMs);
+    }
+    else if (newDelayMs > static_cast<int32_t>(kMaxDelayMs))
+    {
+        newDelayMs = static_cast<int32_t>(kMaxDelayMs);
+    }
+    m_nSendGpsDataDelayMs = static_cast<uint32_t>(newDelayMs);
+
+#if !defined(NDEBUG)
+    if ((++s_tuneLogCounter % 10) == 0)
+    {
+        const uint32_t elapsedAfterGpggaMs = m_nLastSendTimerFireMs - m_nLastGpggaRxMs;
+        LogInfo("GPS delay tune: elapsed_after_gpgga_ms=" + std::to_string(elapsedAfterGpggaMs) +
+                ", target_after_gpgga_ms=" + std::to_string(kTargetAfterGpggaMs) +
+                ", no_early_cycles=" + std::to_string(s_noEarlyFireCycles) + ", delay_ms=" + std::to_string(m_nSendGpsDataDelayMs));
+    }
+#endif
+}
+
 bool GPS::validateSentence(std::string& strSentence)
 {
     // Validate format and remove checksum and CRLF
@@ -384,7 +494,7 @@ bool GPS::validateSentence(std::string& strSentence)
     {
         return false;
     }
-    std::string specifiedCheck  = strSentence.substr(nLen - 4, 2);
+    std::string specifiedCheck = strSentence.substr(nLen - 4, 2);
     std::string calculatedCheck = checkSum(strSentence.substr(1, nLen - 6));
     if (calculatedCheck != specifiedCheck)
     {
@@ -412,9 +522,9 @@ std::string GPS::convertToDegrees(std::string strRaw, int width)
 {
     // Convert (D)DDMM.mmmm to decimal degrees
     double dRawAsDouble = stod(strRaw);
-    int firstdigits     = int(dRawAsDouble / 100);
-    int nexttwodigits   = dRawAsDouble - double(firstdigits * 100);
-    double converted    = double(firstdigits) + nexttwodigits / 60.0;
+    int firstdigits = int(dRawAsDouble / 100);
+    int nexttwodigits = dRawAsDouble - double(firstdigits * 100);
+    double converted = double(firstdigits) + nexttwodigits / 60.0;
     std::stringstream oss;
     oss << std::fixed << std::setw(width) << std::setfill(' ') << std::setprecision(4) << converted;
     return oss.str();
@@ -426,14 +536,18 @@ void GPS::on_uart_rx()
     uart_set_irqs_enabled(sg_pUART, false, false);
     while (uart_is_readable(sg_pUART))
     {
-        char ch                 = uart_getc(sg_pUART);
-        sm_szBuffer[sm_iNext++] = ch;
-        sm_iNext %= GPS_BUFSIZE;
+        char ch = uart_getc(sg_pUART);
+        sm_szBuffer[sm_iNext] = ch;
+        sm_iNext += 1;
+        if (sm_iNext >= GPS_BUFSIZE)
+        {
+            sm_iNext = 0; // wrap around, will sync up eventually
+        }
         if (ch == '\n')
         {
-            sm_szBuffer[sm_iNext++] = '\0';
-            sm_iNext %= GPS_BUFSIZE;
-            sm_nSentences += 1;
+            sm_szBuffer[sm_iNext] = '\0';
+            sm_qSentences.push(std::string((char*)sm_szBuffer));
+            sm_iNext = 0;
         }
     }
     uart_set_irqs_enabled(sg_pUART, true, false);
@@ -443,15 +557,10 @@ bool GPS::getSentence(std::string& strSentence)
 {
     bool bFound = false;
     uart_set_irqs_enabled(sg_pUART, false, false);
-    if (sm_nSentences > 0)
+    if (!sm_qSentences.empty())
     {
-        strSentence.clear();
-        for (size_t i = sm_iHead; '\0' != sm_szBuffer[i]; i = (i + 1) % GPS_BUFSIZE)
-        {
-            strSentence += sm_szBuffer[i];
-        }
-        sm_iHead = (sm_iHead + strSentence.length() + 1) % GPS_BUFSIZE;
-        sm_nSentences -= 1;
+        strSentence = sm_qSentences.front();
+        sm_qSentences.pop();
         bFound = true;
     }
     uart_set_irqs_enabled(sg_pUART, true, false);

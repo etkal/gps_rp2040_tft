@@ -287,7 +287,6 @@ void ILI_TFT::Clear(uint16_t colour)
         Fill(COLOUR_BLACK);
         Show();
     }
-    std::cout << "Display cleared." << std::endl;
 }
 
 void ILI_TFT::SetQuadrant(QUADRANT eQuadrant)

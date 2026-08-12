@@ -107,6 +107,7 @@ target_link_libraries(gps_tft
     hardware_spi
     power_status_adc
     pico_aon_timer
+    pico_multicore
 )
 
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)

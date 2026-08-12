@@ -13,15 +13,16 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <queue>
 
 class SatInfo
 {
 public:
     SatInfo(uint num = 0, uint el = 0, uint az = 0, uint rssi = 0)
     {
-        m_num  = num;
-        m_el   = el;
-        m_az   = az;
+        m_num = num;
+        m_el = el;
+        m_az = az;
         m_rssi = rssi;
     }
     ~SatInfo()
@@ -47,6 +48,24 @@ public:
           bExternalAntenna(false)
     {
     }
+
+    GPSData(const GPSData& rhs)
+        : bHasPosition(rhs.bHasPosition),
+          bExternalAntenna(rhs.bExternalAntenna),
+          strLatitude(rhs.strLatitude),
+          strLongitude(rhs.strLongitude),
+          strAltitude(rhs.strAltitude),
+          strNumSats(rhs.strNumSats),
+          strGPSTimeRaw(rhs.strGPSTimeRaw),
+          strGPSDateRaw(rhs.strGPSDateRaw),
+          strGPSTime(rhs.strGPSTime),
+          strMode3D(rhs.strMode3D),
+          strSpeed(rhs.strSpeed),
+          mSatList(rhs.mSatList),
+          vUsedList(rhs.vUsedList)
+    {
+    }
+
     ~GPSData() = default;
 
     bool bHasPosition;
@@ -67,7 +86,9 @@ public:
 typedef void (*sentenceCallback)(void* pCtx, std::string strSentence);
 typedef void (*gpsDataCallback)(void* pCtx, GPSData::Shared spGPSData);
 
-auto constexpr GPS_BUFSIZE = 4096; // Circular buffer size
+class AlarmTimer;
+
+auto constexpr GPS_BUFSIZE = 256; // Max NMEA-0183 sentence length is actually 82 characters
 
 class GPS
 {
@@ -87,6 +108,7 @@ public:
 
 private:
     bool processSentence(std::string strSentence);
+    void tuneSendGpsDataDelay();
     bool validateSentence(std::string& strSentence);
     std::string checkSum(const std::string& strSentence);
     std::string convertToDegrees(std::string strRaw, int width);
@@ -95,25 +117,32 @@ private:
     uart_inst_t* m_pUART1; // output echo
 
     // RX buffer management
-    static char sm_szBuffer[GPS_BUFSIZE];
-    static volatile size_t sm_iHead;
+    static volatile char sm_szBuffer[GPS_BUFSIZE];
     static volatile size_t sm_iNext;
-    static volatile size_t sm_nSentences;
+    static std::queue<std::string> sm_qSentences;
     static void on_uart_rx();
     static bool getSentence(std::string& strSentence);
 
     // GPS object members
-    bool m_bExit;
-    bool m_bGSVInProgress;
+    bool m_bExit {false};
+    bool m_bGSVInProgress {false};
     std::string m_strNumGSV;
-    uint64_t m_nSatListTime;
-    bool m_bSendGpsData;
+    uint64_t m_nSatListTime {0};
+    bool m_bSendGpsData {false};
+    bool m_bSendGpsDataDeferredUntilGprmc {false};
+    bool m_bTimerFiredBeforeGprmc {false};
+    uint32_t m_nSendGpsDataDelayMs {700};
+    uint32_t m_nLastGpggaRxMs {0};
+    uint32_t m_nLastGprmcRxMs {0};
+    volatile uint32_t m_nLastSendTimerFireMs {0};
+    volatile bool m_bTuneSendDelayPending {false};
+    std::unique_ptr<AlarmTimer> m_spSendGpsDataTimer;
     GPSData::Shared m_spGPSData;
     SatList m_mSatListIncoming;
     SatList m_mSatListPersistent;
 
-    sentenceCallback m_pSentenceCallBack;
-    void* m_pSentenceCtx;
-    gpsDataCallback m_pGpsDataCallback;
-    void* m_pGpsDataCtx;
+    sentenceCallback m_pSentenceCallBack {nullptr};
+    void* m_pSentenceCtx {nullptr};
+    gpsDataCallback m_pGpsDataCallback {nullptr};
+    void* m_pGpsDataCtx {nullptr};
 };

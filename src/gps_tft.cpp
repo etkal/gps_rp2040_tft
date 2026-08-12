@@ -30,6 +30,7 @@
 #include <iomanip>
 
 #include "pico/stdlib.h"
+#include "pico/multicore.h"
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
 
@@ -57,16 +58,16 @@ static uint32_t getFreeHeap()
 namespace
 {
     constexpr uint64_t timeSyncRetryIntervalSec = 5 * 60;
-    constexpr double pi                         = 3.14159265359;
+    constexpr double pi = 3.14159265359;
 } // namespace
 
-GPS_TFT::GPS_TFT(ILI_TFT::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED, TimeMgr::Shared spTimeMgr)
+GPS_TFT::GPS_TFT(ILI_TFT::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED)
     : m_spDisplay(spDisplay),
       m_spGPS(spGPS),
       m_spLED(spLED),
-      m_spTimeMgr(spTimeMgr),
       m_nLastTimeSyncAttemptSec(std::numeric_limits<uint64_t>::max())
 {
+    critical_section_init(&m_GpsDataCallbackCS);
 }
 
 GPS_TFT::~GPS_TFT()
@@ -99,7 +100,39 @@ void GPS_TFT::Initialize()
 
 void GPS_TFT::Run()
 {
-    m_spGPS->Run();
+    // Start GPS processing loop on processor core 1
+    static auto sm_spGPS = m_spGPS; // Capture shared pointer for use in lambda
+    multicore_launch_core1([]() {
+        GPS::Shared spGPS = sm_spGPS;
+        spGPS->Run();
+    });
+
+    // Main loop for updating the display
+    while (true)
+    {
+        sleep_ms(10); // Sleep for 10ms to avoid busy waiting
+
+        bool bHasQueuedGpsData = false;
+        // Check if we have new GPS data to display, just take the most recent one and discard the rest to avoid UI lag
+        critical_section_enter_blocking(&m_GpsDataCallbackCS);
+        if (!m_qGPSData.empty())
+        {
+            bHasQueuedGpsData = true;
+            m_spGPSData = m_qGPSData.back();
+            while (!m_qGPSData.empty())
+            {
+                m_qGPSData.pop();
+            }
+        }
+        critical_section_exit(&m_GpsDataCallbackCS);
+
+        if (bHasQueuedGpsData && m_spGPSData)
+        {
+            LogInfo("GPS_TFT - Updating UI");
+            updateUI(m_spGPSData);
+            m_spGPSData.reset(); // Free the data
+        }
+    }
 }
 
 void GPS_TFT::sentenceCB(void* pCtx, std::string strSentence)
@@ -109,8 +142,23 @@ void GPS_TFT::sentenceCB(void* pCtx, std::string strSentence)
 
 void GPS_TFT::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
 {
+    LogInfo("GPS_TFT - received GPS data");
+    // This callback is called from the GPS processing loop when new GPS data is available.
+    // It most likely runs on a different thread/core than the main display loop, so we need
+    // to ensure thread safety.  We will perform a deep copy of the GPSData and then call
+    // updateUI() on the main thread in the run loop as soon as queued data is available.
     GPS_TFT* pThis = reinterpret_cast<GPS_TFT*>(pCtx);
-    pThis->updateUI(spGPSData);
+    if (nullptr == pThis)
+    {
+        LogInfo("gpsDataCB: pCtx is null");
+        return;
+    }
+
+    // Make a deep copy of the GPSData to avoid issues with shared ownership and data races
+    critical_section_enter_blocking(&pThis->m_GpsDataCallbackCS);
+    GPSData::Shared spGPSDataCopy = std::make_shared<GPSData>(*spGPSData);
+    pThis->m_qGPSData.push(spGPSDataCopy);
+    critical_section_exit(&pThis->m_GpsDataCallbackCS);
 }
 
 void GPS_TFT::updateUI(GPSData::Shared spGPSData)
@@ -134,13 +182,13 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
     {
         const uint64_t uptimeSec = time_us_64() / 1000000;
         const bool bNeverRetried = (m_nLastTimeSyncAttemptSec == std::numeric_limits<uint64_t>::max());
-        const bool bRetryDue     = !TimeMgr::IsWallClockValid() || bNeverRetried ||
+        const bool bRetryDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
                                (uptimeSec - m_nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec);
         if (bRetryDue)
         {
             m_nLastTimeSyncAttemptSec = uptimeSec;
             LogInfo("Attempting GPS time sync");
-            if (m_spTimeMgr->SetTimeFromGps(m_spGPSData->strGPSTimeRaw, m_spGPSData->strGPSDateRaw))
+            if (TimeMgr::SetTimeFromGps(m_spGPSData->strGPSTimeRaw, m_spGPSData->strGPSDateRaw))
             {
                 LogInfo("GPS time synchronized");
             }
@@ -151,17 +199,17 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
         }
     }
 
-    uint16_t nWidth  = m_spDisplay->Width();
+    uint16_t nWidth = m_spDisplay->Width();
     uint16_t nHeight = m_spDisplay->Height();
 
     // Compute padding dynamically from font dimensions
     constexpr uint PAD_CHARS_X = 1;
     constexpr uint PAD_CHARS_Y = 1;
-    uint X_PAD                 = PAD_CHARS_X * getCharWidth();
-    uint Y_PAD                 = PAD_CHARS_Y * getCharHeight();
+    uint X_PAD = PAD_CHARS_X * getCharWidth();
+    uint Y_PAD = PAD_CHARS_Y * getCharHeight();
 
 #if defined(PLATFORM_PICO)
-    float vsys    = 0.0;
+    float vsys = 0.0;
     bool bBattery = false;
     std::string strVsys;
     if (PICO_OK == power_voltage(&vsys))
@@ -174,7 +222,7 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
     }
 #endif
 
-    auto startTime           = time_us_64();
+    auto startTime = time_us_64();
     static uint64_t showTime = 0;
 
     for (auto nQuadrant : m_spDisplay->GetQuadrants())
@@ -217,12 +265,12 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
 #endif
 
         // Draw clock
-        if (!spGPSData->strGPSTime.empty())
+        if (TimeMgr::IsWallClockValid())
         {
             uint lineHeight = getCharHeight() + 1;
-            uint radius     = m_spDisplay->ShorterSide() / 8;
-            uint xPos       = m_spDisplay->Landscape() ? nWidth / 2 : X_PAD + getCharWidth() * 3;
-            drawClock(xPos, lineHeight * PAD_CHARS_Y, radius, spGPSData->strGPSTime);
+            uint radius = m_spDisplay->ShorterSide() / 8;
+            uint xPos = m_spDisplay->Landscape() ? nWidth / 2 : X_PAD + getCharWidth() * 3;
+            drawClock(xPos, lineHeight * PAD_CHARS_Y, radius, TimeMgr::FormatCurrentTimeHMS());
         }
 
         // Draw bar graph
@@ -243,7 +291,7 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
         drawText(8, "Free: " + std::to_string(getFreeHeap() / 1000) + "kB", COLOUR_WHITE, true, X_PAD);
 #endif
 
-// blit the framebuf to the display quadrant
+        // blit the framebuf to the display quadrant
         m_spDisplay->Show();
     }
     showTime = time_us_64() - startTime;
@@ -277,7 +325,7 @@ void GPS_TFT::drawSatGrid(uint xCenter, uint yCenter, uint radius, uint nRings)
     }
     for (auto oEntry : m_spGPSData->mSatList)
     {
-        auto oSat    = oEntry.second;
+        auto oSat = oEntry.second;
         double elrad = oSat.m_el * pi / 180;
         double azrad = oSat.m_az * pi / 180;
         drawCircleSat(xCenter, yCenter, radius, elrad, azrad, satRadius, COLOUR_WHITE, COLOUR_BLACK);
@@ -304,8 +352,8 @@ void GPS_TFT::drawCircleSat(uint gridCenterX,
     // Draw satellite (fill first, then draw open circle)
     int dx = (nGridRadius - SAT_ICON_RADIUS) * cos(elrad) * sin(azrad);
     int dy = (nGridRadius - SAT_ICON_RADIUS) * cos(elrad) * -cos(azrad);
-    int x  = gridCenterX + dx;
-    int y  = gridCenterY + dy;
+    int x = gridCenterX + dx;
+    int y = gridCenterY + dy;
     m_spDisplay->Ellipse(x, y, satRadius, satRadius, fillColor, true); // Clear area with fill
     m_spDisplay->Ellipse(x, y, satRadius, satRadius, color);           // Draw circle without fill
 }
@@ -314,20 +362,20 @@ void GPS_TFT::drawBarGraph(uint x, uint y, uint width, uint height)
 {
     const BitmapFont* pFont = get_recommended_font(12); // 6x12, narrowest font for bar graph
 
-    uint nMaxSats     = 16;
-    bool bNarrow      = (nMaxSats * (2 * (pFont->width + 4)) > width);
-    uint charWidth    = bNarrow ? pFont->width : getCharWidth();
-    uint charHeight   = bNarrow ? pFont->height : getCharHeight();
-    uint barDelta     = bNarrow ? std::max(std::min(charWidth * 2 + 4, width / nMaxSats), charWidth * 2)
-                                : std::max(std::min(charWidth + 4, width / nMaxSats), charWidth);
-    uint barWidth     = barDelta - 2;
-    uint barPosX      = x + width - (m_spGPSData->mSatList.size() * barDelta);
+    uint nMaxSats = 16;
+    bool bNarrow = (nMaxSats * (2 * (pFont->width + 4)) > width);
+    uint charWidth = bNarrow ? pFont->width : getCharWidth();
+    uint charHeight = bNarrow ? pFont->height : getCharHeight();
+    uint barDelta = bNarrow ? std::max(std::min(charWidth * 2 + 4, width / nMaxSats), charWidth * 2)
+                            : std::max(std::min(charWidth + 4, width / nMaxSats), charWidth);
+    uint barWidth = barDelta - 2;
+    uint barPosX = x + width - (m_spGPSData->mSatList.size() * barDelta);
     uint barHeightMax = height - (charHeight + 1) * 2;
 
     for (auto oEntry : m_spGPSData->mSatList)
     {
-        auto oSat      = oEntry.second;
-        uint rssi      = oSat.m_rssi;
+        auto oSat = oEntry.second;
+        uint rssi = oSat.m_rssi;
         uint barHeight = (int)((double)barHeightMax * (double)rssi / 64);
         uint baseLineY = y + barHeightMax;
         m_spDisplay->HLine(barPosX, baseLineY, barDelta, COLOUR_WHITE);
@@ -369,31 +417,31 @@ void GPS_TFT::drawBarGraph(uint x, uint y, uint width, uint height)
 
 void GPS_TFT::drawClock(uint x, uint y, uint radius, std::string strTime)
 {
-    uint xCenter             = x + radius;
-    uint yCenter             = y + radius;
-    uint nHour               = atoi(strTime.substr(0, 2).c_str());
-    const float gmtOffset    = m_spTimeMgr ? m_spTimeMgr->TimeZoneOffsetHours() : 0.0f;
-    float hour               = (float)(nHour % 12) + gmtOffset;
-    hour                     = (hour < 0) ? hour + 12 : hour;
-    hour                     = (hour >= 12) ? hour - 12 : hour;
-    float minute             = (float)atoi(strTime.substr(3, 2).c_str());
-    float second             = (float)atoi(strTime.substr(6, 2).c_str());
-    uint16_t ringColor       = COLOUR_LIME;
-    uint16_t faceColor       = COLOUR_BLACK;
-    uint16_t handColor       = COLOUR_WHITE;
+    uint xCenter = x + radius;
+    uint yCenter = y + radius;
+    uint nHour = atoi(strTime.substr(0, 2).c_str());
+    const float gmtOffset = TimeMgr::TimeZoneOffsetHours();
+    float hour = (float)(nHour % 12) + gmtOffset;
+    hour = (hour < 0) ? hour + 12 : hour;
+    hour = (hour >= 12) ? hour - 12 : hour;
+    float minute = (float)atoi(strTime.substr(3, 2).c_str());
+    float second = (float)atoi(strTime.substr(6, 2).c_str());
+    uint16_t ringColor = COLOUR_LIME;
+    uint16_t faceColor = COLOUR_BLACK;
+    uint16_t handColor = COLOUR_WHITE;
     uint16_t secondHandColor = COLOUR_RED;
-    double handLenHour       = radius * 0.4;
-    double handLenMinute     = radius * 0.7;
-    double handLenSecond     = radius * 0.8;
-    double radiansHour       = 2 * pi * (((hour * 3600.0) + (minute * 60.0) + second) / (12.0 * 60.0 * 60.0));
-    double radiansMinute     = 2 * pi * (((minute * 60.0) + second) / (60.0 * 60.0));
-    double radiansSecond     = 2 * pi * (second / 60.0);
-    int dxh                  = int(handLenHour * sin(radiansHour));
-    int dyh                  = int(handLenHour * -cos(radiansHour));
-    int dxm                  = int(handLenMinute * sin(radiansMinute));
-    int dym                  = int(handLenMinute * -cos(radiansMinute));
-    int dxs                  = int(handLenSecond * sin(radiansSecond));
-    int dys                  = int(handLenSecond * -cos(radiansSecond));
+    double handLenHour = radius * 0.4;
+    double handLenMinute = radius * 0.7;
+    double handLenSecond = radius * 0.8;
+    double radiansHour = 2 * pi * (((hour * 3600.0) + (minute * 60.0) + second) / (12.0 * 60.0 * 60.0));
+    double radiansMinute = 2 * pi * (((minute * 60.0) + second) / (60.0 * 60.0));
+    double radiansSecond = 2 * pi * (second / 60.0);
+    int dxh = int(handLenHour * sin(radiansHour));
+    int dyh = int(handLenHour * -cos(radiansHour));
+    int dxm = int(handLenMinute * sin(radiansMinute));
+    int dym = int(handLenMinute * -cos(radiansMinute));
+    int dxs = int(handLenSecond * sin(radiansSecond));
+    int dys = int(handLenSecond * -cos(radiansSecond));
 
     // Draw the face
     m_spDisplay->Ellipse(xCenter, yCenter, radius, radius, ringColor, false);
@@ -403,8 +451,8 @@ void GPS_TFT::drawClock(uint x, uint y, uint radius, std::string strTime)
     {
         uint16_t colDot = (degDot % 90 == 0) ? COLOUR_BLUE : COLOUR_GRAY;
         uint16_t sizDot = (degDot % 90 == 0) ? 2 : 1;
-        uint dxDot      = int((radius - sizDot) * sin(degDot * pi / 180));
-        uint dyDot      = int((radius - sizDot) * -cos(degDot * pi / 180));
+        uint dxDot = int((radius - sizDot) * sin(degDot * pi / 180));
+        uint dyDot = int((radius - sizDot) * -cos(degDot * pi / 180));
         m_spDisplay->Ellipse(xCenter + dxDot, yCenter + dyDot, sizDot, sizDot, colDot, true);
     }
     // Draw the hands
@@ -426,8 +474,8 @@ int GPS_TFT::linePos(int nLine)
 void GPS_TFT::drawText(int nLine, std::string strText, uint16_t color, bool bRightAlign, uint nPadding)
 {
     uint charWidth = getCharWidth();
-    int x          = (!bRightAlign) ? 0 : m_spDisplay->Width() - (strText.length() * charWidth);
-    int y          = linePos(nLine);
+    int x = (!bRightAlign) ? 0 : m_spDisplay->Width() - (strText.length() * charWidth);
+    int y = linePos(nLine);
     x += bRightAlign ? -nPadding : nPadding;
     m_spDisplay->Text(strText.c_str(), x, y, color);
 }

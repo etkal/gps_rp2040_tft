@@ -178,12 +178,15 @@ int main()
     spLED->SetPixel(0, led_green);
 #elif defined(USE_LED_PIN)
     spLED = std::make_shared<LED_pico>(USE_LED_PIN);
+    spLED->Initialize();
     spLED->SetIgnore({led_red, led_magenta});
 #elif defined(PICO_DEFAULT_LED_PIN)
     spLED = std::make_shared<LED_pico>(PICO_DEFAULT_LED_PIN);
+    spLED->Initialize();
     spLED->SetIgnore({led_red, led_magenta});
 #elif defined(PLATFORM_PICO_W)
     spLED = std::make_shared<LED_pico_w>(CYW43_WL_GPIO_LED_PIN);
+    spLED->Initialize();
     spLED->SetIgnore({led_red, led_magenta});
 #endif
 
@@ -215,10 +218,10 @@ int main()
     spDisplay->Clear(COLOUR_BLACK);
 #endif
 
-    TimeMgr::Shared spTimeMgr = std::make_shared<TimeMgr>(TIME_ZONE);
+    TimeMgr::InitializeSingleton(TIME_ZONE);
 
     // Create the GPS_TFT display object
-    GPS_TFT::Shared spDevice = std::make_shared<GPS_TFT>(spDisplay, spGPS, spLED, spTimeMgr);
+    GPS_TFT::Shared spDevice = std::make_shared<GPS_TFT>(spDisplay, spGPS, spLED);
 
     spDevice->Initialize();
 
@@ -265,22 +268,22 @@ void SplashDemo(ILI_TFT::Shared spDisplay)
         };
 
         auto text_colour_for_bg = [](uint16_t c) -> uint16_t {
-            uint8_t r5    = (c >> 11) & 0x1f;
-            uint8_t g6    = (c >> 5) & 0x3f;
-            uint8_t b5    = c & 0x1f;
-            uint16_t r    = (r5 * 255) / 31;
-            uint16_t g    = (g6 * 255) / 63;
-            uint16_t b    = (b5 * 255) / 31;
+            uint8_t r5 = (c >> 11) & 0x1f;
+            uint8_t g6 = (c >> 5) & 0x3f;
+            uint8_t b5 = c & 0x1f;
+            uint16_t r = (r5 * 255) / 31;
+            uint16_t g = (g6 * 255) / 63;
+            uint16_t b = (b5 * 255) / 31;
             uint16_t luma = static_cast<uint16_t>((299u * r + 587u * g + 114u * b) / 1000u);
             return (luma > 140) ? COLOUR_BLACK : COLOUR_WHITE;
         };
 
         const int cols = 4;
         const int rows = 4;
-        int dispW      = spDisplay->Width();
-        int dispH      = spDisplay->Height();
-        int cellW      = dispW / cols;
-        int cellH      = dispH / rows;
+        int dispW = spDisplay->Width();
+        int dispH = spDisplay->Height();
+        int cellW = dispW / cols;
+        int cellH = dispH / rows;
 
         auto nFontSize = spDisplay->get_recommended_font_size();
         // Initialize display
@@ -294,10 +297,10 @@ void SplashDemo(ILI_TFT::Shared spDisplay)
             {
                 int col = i % cols;
                 int row = i / cols;
-                int x   = col * cellW;
-                int y   = row * cellH;
-                int w   = (col == cols - 1) ? (dispW - x) : cellW;
-                int h   = (row == rows - 1) ? (dispH - y) : cellH;
+                int x = col * cellW;
+                int y = row * cellH;
+                int w = (col == cols - 1) ? (dispW - x) : cellW;
+                int h = (row == rows - 1) ? (dispH - y) : cellH;
 
                 spDisplay->FillRect(x, y, w, h, colours[i].value);
                 uint16_t textColour = text_colour_for_bg(colours[i].value);
@@ -307,7 +310,7 @@ void SplashDemo(ILI_TFT::Shared spDisplay)
 
             spDisplay->Show();
         }
-        sleep_ms(5000);
+        sleep_ms(2000);
     }
 }
 #endif
