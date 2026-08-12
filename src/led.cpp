@@ -41,15 +41,27 @@ LED_pico::LED_pico(uint pin)
     : m_nPin(pin),
       m_nColor(led_white)
 {
-    gpio_init(m_nPin);
-    gpio_set_dir(m_nPin, GPIO_OUT);
-    Off();
+}
+
+LED_pico::LED_pico()
+    : m_nPin(-1),
+      m_nColor(led_white)
+{
+    // Default constructor for LED_pico, pin will need to be set later, used by LED_pico_w to avoid
+    // calling gpio_init() in the base class constructor.
 }
 
 LED_pico::~LED_pico()
 {
     Off();
     gpio_deinit(m_nPin);
+}
+
+void LED_pico::Initialize()
+{
+    gpio_init(m_nPin);
+    gpio_set_dir(m_nPin, GPIO_OUT);
+    Off();
 }
 
 void LED_pico::On()
@@ -86,7 +98,6 @@ LED_neo::LED_neo(uint numLEDs, uint pin, uint powerPin, bool bIsRGBW)
       m_nNumLEDs(numLEDs),
       m_bIsRGBW(bIsRGBW)
 {
-    Off();
 }
 
 LED_neo::~LED_neo()
@@ -101,8 +112,8 @@ LED_neo::~LED_neo()
 
 void LED_neo::Initialize()
 {
-    PIO pio     = pio0;
-    int sm      = 0;
+    PIO pio = pio0;
+    int sm = 0;
     uint offset = pio_add_program(pio, &ws2812_program);
     ws2812_program_init(pio, sm, offset, m_nPin, 800000, m_bIsRGBW);
 
@@ -114,6 +125,7 @@ void LED_neo::Initialize()
     }
 
     m_vPixels.resize(m_nNumLEDs);
+    Off();
 }
 
 void LED_neo::On()
@@ -139,12 +151,16 @@ void LED_neo::SetPixel(uint idx, uint32_t color)
 
 #if defined(PLATFORM_PICO_W)
 LED_pico_w::LED_pico_w(uint pin)
-    : LED_pico(pin)
+{
+    m_nPin = pin;
+}
+
+LED_pico_w::~LED_pico_w()
 {
     Off();
 }
 
-LED_pico_w::~LED_pico_w()
+void LED_pico_w::Initialize()
 {
     Off();
 }

@@ -32,7 +32,7 @@ class GPS_TFT
 public:
     typedef std::shared_ptr<GPS_TFT> Shared;
 
-    GPS_TFT(ILI_TFT::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED, TimeMgr::Shared spTimeMgr);
+    GPS_TFT(ILI_TFT::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED);
     ~GPS_TFT();
 
     void Initialize();
@@ -52,7 +52,7 @@ private:
                        float elrad,
                        float azrad,
                        uint satRadius,
-                       uint16_t color     = COLOUR_WHITE,
+                       uint16_t color = COLOUR_WHITE,
                        uint16_t fillColor = COLOUR_WHITE);
     int linePos(int nLine);
     void drawText(int nLine, std::string strText, uint16_t color = COLOUR_WHITE, bool bRightAlign = true, uint nPadding = 0);
@@ -90,8 +90,6 @@ private:
     LED::Shared m_spLED;
     GPSData::Shared m_spGPSData;            // Current data being used for display
     std::queue<GPSData::Shared> m_qGPSData; // Queue of GPS data to be processed by the display loop
-    TimeMgr::Shared m_spTimeMgr;
     uint64_t m_nLastTimeSyncAttemptSec;
     critical_section m_GpsDataCallbackCS; // Protects access to GPS data queue
-    uint64_t m_nLastUpdateUISecond;
 };

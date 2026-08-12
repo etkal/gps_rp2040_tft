@@ -20,9 +20,9 @@ class SatInfo
 public:
     SatInfo(uint num = 0, uint el = 0, uint az = 0, uint rssi = 0)
     {
-        m_num  = num;
-        m_el   = el;
-        m_az   = az;
+        m_num = num;
+        m_el = el;
+        m_az = az;
         m_rssi = rssi;
     }
     ~SatInfo()
@@ -48,7 +48,7 @@ public:
           bExternalAntenna(false)
     {
     }
-    
+
     GPSData(const GPSData& rhs)
         : bHasPosition(rhs.bHasPosition),
           bExternalAntenna(rhs.bExternalAntenna),
@@ -86,6 +86,8 @@ public:
 typedef void (*sentenceCallback)(void* pCtx, std::string strSentence);
 typedef void (*gpsDataCallback)(void* pCtx, GPSData::Shared spGPSData);
 
+class AlarmTimer;
+
 auto constexpr GPS_BUFSIZE = 256; // Max NMEA-0183 sentence length is actually 82 characters
 
 class GPS
@@ -106,6 +108,7 @@ public:
 
 private:
     bool processSentence(std::string strSentence);
+    void tuneSendGpsDataDelay();
     bool validateSentence(std::string& strSentence);
     std::string checkSum(const std::string& strSentence);
     std::string convertToDegrees(std::string strRaw, int width);
@@ -126,6 +129,14 @@ private:
     std::string m_strNumGSV;
     uint64_t m_nSatListTime {0};
     bool m_bSendGpsData {false};
+    bool m_bSendGpsDataDeferredUntilGprmc {false};
+    bool m_bTimerFiredBeforeGprmc {false};
+    uint32_t m_nSendGpsDataDelayMs {700};
+    uint32_t m_nLastGpggaRxMs {0};
+    uint32_t m_nLastGprmcRxMs {0};
+    volatile uint32_t m_nLastSendTimerFireMs {0};
+    volatile bool m_bTuneSendDelayPending {false};
+    std::unique_ptr<AlarmTimer> m_spSendGpsDataTimer;
     GPSData::Shared m_spGPSData;
     SatList m_mSatListIncoming;
     SatList m_mSatListPersistent;

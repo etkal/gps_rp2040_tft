@@ -47,8 +47,8 @@ namespace
     constexpr uint64_t validEpochThresholdSec = 1700000000ULL;
 
 #if TIMEMGR_ENABLE_NTP
-    constexpr uint32_t ntpPort              = 123;
-    constexpr uint32_t ntpPacketSize        = 48;
+    constexpr uint32_t ntpPort = 123;
+    constexpr uint32_t ntpPacketSize = 48;
     constexpr uint64_t ntpEpochDeltaSeconds = 2208988800ULL;
 #endif
 
@@ -72,7 +72,7 @@ namespace
         const auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) {
             return std::isspace(ch) != 0;
         });
-        const auto end   = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) {
+        const auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) {
                              return std::isspace(ch) != 0;
                          }).base();
         return (begin >= end) ? std::string() : std::string(begin, end);
@@ -128,15 +128,15 @@ namespace
 
     bool is_dst_active(std::time_t whenUtc, DstRule rule)
     {
-        std::tm utcTm{};
+        std::tm utcTm {};
         if (gmtime_r(&whenUtc, &utcTm) == nullptr)
         {
             return false;
         }
 
-        const int year  = utcTm.tm_year + 1900;
+        const int year = utcTm.tm_year + 1900;
         const int month = utcTm.tm_mon + 1;
-        const int day   = utcTm.tm_mday;
+        const int day = utcTm.tm_mday;
 
         switch (rule)
         {
@@ -215,13 +215,13 @@ namespace
         if (value[0] == '+' || value[0] == '-')
         {
             negative = value[0] == '-';
-            value    = value.substr(1);
+            value = value.substr(1);
         }
 
         const auto separator = value.find(':');
-        int hours            = 0;
-        int minutes          = 0;
-        bool parsed          = false;
+        int hours = 0;
+        int minutes = 0;
+        bool parsed = false;
 
         if (separator == std::string::npos)
         {
@@ -229,33 +229,33 @@ namespace
             {
                 return false;
             }
-            const char* start      = value.c_str();
-            char* end              = nullptr;
+            const char* start = value.c_str();
+            char* end = nullptr;
             const long parsedValue = std::strtol(start, &end, 10);
             if (end != start && *end == '\0')
             {
-                hours   = static_cast<int>(parsedValue);
+                hours = static_cast<int>(parsedValue);
                 minutes = 0;
-                parsed  = true;
+                parsed = true;
             }
         }
         else
         {
-            const std::string hoursText   = value.substr(0, separator);
+            const std::string hoursText = value.substr(0, separator);
             const std::string minutesText = value.substr(separator + 1);
             if (!hoursText.empty() && !minutesText.empty())
             {
-                const char* hoursStart   = hoursText.c_str();
-                char* hoursEnd           = nullptr;
-                const long parsedHours   = std::strtol(hoursStart, &hoursEnd, 10);
+                const char* hoursStart = hoursText.c_str();
+                char* hoursEnd = nullptr;
+                const long parsedHours = std::strtol(hoursStart, &hoursEnd, 10);
                 const char* minutesStart = minutesText.c_str();
-                char* minutesEnd         = nullptr;
+                char* minutesEnd = nullptr;
                 const long parsedMinutes = std::strtol(minutesStart, &minutesEnd, 10);
                 if (hoursEnd != hoursStart && *hoursEnd == '\0' && minutesEnd != minutesStart && *minutesEnd == '\0')
                 {
-                    hours   = static_cast<int>(parsedHours);
+                    hours = static_cast<int>(parsedHours);
                     minutes = static_cast<int>(parsedMinutes);
-                    parsed  = true;
+                    parsed = true;
                 }
             }
         }
@@ -293,7 +293,7 @@ namespace
 
     bool parse_gprmc_time(const std::string& timeText, int& hourOut, int& minuteOut, int& secondOut)
     {
-        unsigned int hour   = 0;
+        unsigned int hour = 0;
         unsigned int minute = 0;
         unsigned int second = 0;
         if (!parse_fixed_unsigned(timeText, 0, 2, hour) || !parse_fixed_unsigned(timeText, 2, 2, minute) ||
@@ -302,7 +302,7 @@ namespace
             return false;
         }
 
-        hourOut   = static_cast<int>(hour);
+        hourOut = static_cast<int>(hour);
         minuteOut = static_cast<int>(minute);
         secondOut = static_cast<int>(second);
         return hourOut < 24 && minuteOut < 60 && secondOut < 60;
@@ -310,9 +310,9 @@ namespace
 
     bool parse_gprmc_date(const std::string& dateText, int& yearOut, int& monthOut, int& dayOut)
     {
-        unsigned int day   = 0;
+        unsigned int day = 0;
         unsigned int month = 0;
-        unsigned int year  = 0;
+        unsigned int year = 0;
         if (!parse_fixed_unsigned(dateText, 0, 2, day) || !parse_fixed_unsigned(dateText, 2, 2, month) ||
             !parse_fixed_unsigned(dateText, 4, 2, year))
         {
@@ -329,7 +329,7 @@ namespace
         }
 
         monthOut = static_cast<int>(month);
-        dayOut   = static_cast<int>(day);
+        dayOut = static_cast<int>(day);
         return monthOut >= 1 && monthOut <= 12 && dayOut >= 1 && dayOut <= 31;
     }
 
@@ -356,13 +356,13 @@ namespace
 
     std::time_t utc_time_from_ymdhms(int year, int month, int day, int hour, int minute, int second)
     {
-        const int adjustedYear          = year - (month <= 2 ? 1 : 0);
-        const int era                   = (adjustedYear >= 0 ? adjustedYear : adjustedYear - 399) / 400;
-        const unsigned int yoe          = static_cast<unsigned int>(adjustedYear - era * 400);
-        const unsigned int monthIndex   = static_cast<unsigned int>(month + (month > 2 ? -3 : 9));
-        const unsigned int dayOfYear    = (153 * monthIndex + 2) / 5 + static_cast<unsigned int>(day) - 1;
-        const unsigned int dayOfEra     = yoe * 365 + yoe / 4 - yoe / 100 + dayOfYear;
-        const int64_t daysSinceEpoch    = static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(dayOfEra) - 719468;
+        const int adjustedYear = year - (month <= 2 ? 1 : 0);
+        const int era = (adjustedYear >= 0 ? adjustedYear : adjustedYear - 399) / 400;
+        const unsigned int yoe = static_cast<unsigned int>(adjustedYear - era * 400);
+        const unsigned int monthIndex = static_cast<unsigned int>(month + (month > 2 ? -3 : 9));
+        const unsigned int dayOfYear = (153 * monthIndex + 2) / 5 + static_cast<unsigned int>(day) - 1;
+        const unsigned int dayOfEra = yoe * 365 + yoe / 4 - yoe / 100 + dayOfYear;
+        const int64_t daysSinceEpoch = static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(dayOfEra) - 719468;
         const int64_t secondsSinceEpoch = daysSinceEpoch * 86400 + static_cast<int64_t>(hour) * 3600 + static_cast<int64_t>(minute) * 60 +
                                           second;
         return static_cast<std::time_t>(secondsSinceEpoch);
@@ -406,7 +406,7 @@ namespace
             return;
         }
 
-        std::array<uint8_t, ntpPacketSize> packet{};
+        std::array<uint8_t, ntpPacketSize> packet {};
         if (pbuf_copy_partial(p, packet.data(), packet.size(), 0) != ntpPacketSize)
         {
             pCtx->bResponseFailed = true;
@@ -436,7 +436,7 @@ namespace
         }
 
         pCtx->serverAddr = *ipaddr;
-        pCtx->bDnsReady  = true;
+        pCtx->bDnsReady = true;
     }
 
     bool wait_for_flag(const volatile bool& bDoneFlag, const volatile bool& bFailFlag, uint32_t timeoutMs)
@@ -463,13 +463,13 @@ namespace
 
     std::string format_uptime_timestamp()
     {
-        const uint64_t nowUs    = time_us_64();
-        const uint64_t totalMs  = nowUs / 1000;
-        const uint64_t ms       = totalMs % 1000;
+        const uint64_t nowUs = time_us_64();
+        const uint64_t totalMs = nowUs / 1000;
+        const uint64_t ms = totalMs % 1000;
         const uint64_t totalSec = totalMs / 1000;
-        const uint64_t sec      = totalSec % 60;
-        const uint64_t min      = (totalSec / 60) % 60;
-        const uint64_t hour     = totalSec / 3600;
+        const uint64_t sec = totalSec % 60;
+        const uint64_t min = (totalSec / 60) % 60;
+        const uint64_t hour = totalSec / 3600;
 
         std::ostringstream out;
         out << "UP " << std::setfill('0') << std::setw(2) << hour << ':' << std::setw(2) << min << ':' << std::setw(2) << sec << '.'
@@ -477,6 +477,28 @@ namespace
         return out.str();
     }
 } // namespace
+
+TimeMgr::Shared TimeMgr::sm_spTimeMgr;
+
+TimeMgr::Shared TimeMgr::GetInstance()
+{
+    if (!sm_spTimeMgr)
+    {
+        sm_spTimeMgr = Shared(new TimeMgr("UTC"));
+    }
+    return sm_spTimeMgr;
+}
+
+void TimeMgr::InitializeSingleton(std::string timeZoneName)
+{
+    if (!sm_spTimeMgr)
+    {
+        sm_spTimeMgr = Shared(new TimeMgr(std::move(timeZoneName)));
+        return;
+    }
+
+    sm_spTimeMgr->setTimeZoneName(std::move(timeZoneName));
+}
 
 bool TimeMgr::ResolveTimeZoneOffset(const std::string& timeZoneName, std::time_t whenUtc, float& offsetHours, bool* pIsDst)
 {
@@ -521,7 +543,7 @@ bool TimeMgr::ResolveTimeZoneOffset(const std::string& timeZoneName, std::time_t
     }
 
     const DstOverride dstOverride = parse_dst_override();
-    const bool isDst              = (whenUtc > 0) ? resolve_dst_for_rule(dstOverride, whenUtc, DstRule::NorthernHemisphere) : false;
+    const bool isDst = (whenUtc > 0) ? resolve_dst_for_rule(dstOverride, whenUtc, DstRule::NorthernHemisphere) : false;
 
     if (lower == "america/new_york" || lower == "america/toronto" || lower == "america/halifax")
     {
@@ -571,7 +593,7 @@ bool TimeMgr::ResolveTimeZoneOffset(const std::string& timeZoneName, std::time_t
     if (lower == "europe/london" || lower == "europe/ireland" || lower == "europe/dublin")
     {
         const bool dst = (whenUtc > 0) ? resolve_dst_for_rule(dstOverride, whenUtc, DstRule::European) : false;
-        offsetHours    = dst ? 1.0f : 0.0f;
+        offsetHours = dst ? 1.0f : 0.0f;
         if (pIsDst != nullptr)
         {
             *pIsDst = dst;
@@ -582,7 +604,7 @@ bool TimeMgr::ResolveTimeZoneOffset(const std::string& timeZoneName, std::time_t
         lower == "europe/madrid")
     {
         const bool dst = (whenUtc > 0) ? resolve_dst_for_rule(dstOverride, whenUtc, DstRule::European) : false;
-        offsetHours    = dst ? 2.0f : 1.0f;
+        offsetHours = dst ? 2.0f : 1.0f;
         if (pIsDst != nullptr)
         {
             *pIsDst = dst;
@@ -610,7 +632,7 @@ bool TimeMgr::ResolveTimeZoneOffset(const std::string& timeZoneName, std::time_t
     if (lower == "australia/sydney" || lower == "australia/melbourne")
     {
         const bool dst = (whenUtc > 0) ? resolve_dst_for_rule(dstOverride, whenUtc, DstRule::SouthernHemisphere) : false;
-        offsetHours    = dst ? 11.0f : 10.0f;
+        offsetHours = dst ? 11.0f : 10.0f;
         if (pIsDst != nullptr)
         {
             *pIsDst = dst;
@@ -654,12 +676,12 @@ bool TimeMgr::IsGpsTimeDateWithinOneSecond(const std::string& gpsTime, const std
         return false;
     }
 
-    int hour   = 0;
+    int hour = 0;
     int minute = 0;
     int second = 0;
-    int year   = 0;
-    int month  = 0;
-    int day    = 0;
+    int year = 0;
+    int month = 0;
+    int day = 0;
 
     if (!parse_gprmc_time(gpsTime, hour, minute, second) || !parse_gprmc_date(gpsDate, year, month, day) || !is_valid_ymd(year, month, day))
     {
@@ -668,7 +690,7 @@ bool TimeMgr::IsGpsTimeDateWithinOneSecond(const std::string& gpsTime, const std
 
     const std::time_t gpsUtc = utc_time_from_ymdhms(year, month, day, hour, minute, second);
     const std::time_t nowUtc = std::time(nullptr);
-    const int64_t diff       = static_cast<int64_t>(nowUtc) - static_cast<int64_t>(gpsUtc);
+    const int64_t diff = static_cast<int64_t>(nowUtc) - static_cast<int64_t>(gpsUtc);
     return diff >= -1 && diff <= 1;
 }
 
@@ -679,9 +701,9 @@ std::string TimeMgr::FormatCurrentTimestamp()
         return format_uptime_timestamp();
     }
 
-    const auto now             = std::chrono::system_clock::now();
+    const auto now = std::chrono::system_clock::now();
     const std::time_t nowTimeT = std::chrono::system_clock::to_time_t(now);
-    std::tm tmNow{};
+    std::tm tmNow {};
     localtime_r(&nowTimeT, &tmNow);
 
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
@@ -699,7 +721,7 @@ std::string TimeMgr::FormatCurrentTimeHMS()
     }
 
     const std::time_t now = std::time(nullptr);
-    std::tm tmNow{};
+    std::tm tmNow {};
     localtime_r(&now, &tmNow);
 
     char buf[32] = {0};
@@ -722,6 +744,51 @@ TimeMgr::TimeMgr(std::string timeZoneName)
 
 bool TimeMgr::SetTimeFromNtp(uint32_t timeoutMs)
 {
+    return GetInstance()->setTimeFromNtp(timeoutMs);
+}
+
+bool TimeMgr::SetTimeFromGps(const std::string& gpsTime, const std::string& gpsDate)
+{
+    return GetInstance()->setTimeFromGps(gpsTime, gpsDate);
+}
+
+bool TimeMgr::RefreshTimeZoneOffset(std::time_t whenUtc)
+{
+    return GetInstance()->refreshTimeZoneOffset(whenUtc);
+}
+
+bool TimeMgr::IsValid()
+{
+    return GetInstance()->isValid();
+}
+
+bool TimeMgr::HasTimeZoneOffset()
+{
+    return GetInstance()->hasTimeZoneOffset();
+}
+
+float TimeMgr::TimeZoneOffsetHours()
+{
+    return GetInstance()->timeZoneOffsetHours();
+}
+
+bool TimeMgr::IsDst()
+{
+    return GetInstance()->isDst();
+}
+
+const std::string& TimeMgr::TimeZoneName()
+{
+    return GetInstance()->timeZoneName();
+}
+
+void TimeMgr::SetTimeZoneName(std::string timeZoneName)
+{
+    GetInstance()->setTimeZoneName(std::move(timeZoneName));
+}
+
+bool TimeMgr::setTimeFromNtp(uint32_t timeoutMs)
+{
     (void)timeoutMs;
 
     if (IsWallClockValid())
@@ -732,7 +799,7 @@ bool TimeMgr::SetTimeFromNtp(uint32_t timeoutMs)
 #if !TIMEMGR_ENABLE_NTP
     return false;
 #else
-    NtpQueryContext ctx{};
+    NtpQueryContext ctx {};
 
     cyw43_arch_lwip_begin();
     err_t dnsErr = dns_gethostbyname("pool.ntp.org", &ctx.serverAddr, ntp_dns_found_callback, &ctx);
@@ -758,7 +825,7 @@ bool TimeMgr::SetTimeFromNtp(uint32_t timeoutMs)
     {
         udp_recv(ctx.pUdp, ntp_recv_callback, &ctx);
 
-        std::array<uint8_t, ntpPacketSize> request{};
+        std::array<uint8_t, ntpPacketSize> request {};
         request[0] = 0x1b;
 
         struct pbuf* pPacket = pbuf_alloc(PBUF_TRANSPORT, request.size(), PBUF_RAM);
@@ -799,8 +866,8 @@ bool TimeMgr::SetTimeFromNtp(uint32_t timeoutMs)
     }
 
     const time_t unixSeconds = static_cast<time_t>(ctx.seconds1900 - ntpEpochDeltaSeconds);
-    timeval tv{};
-    tv.tv_sec  = unixSeconds;
+    timeval tv {};
+    tv.tv_sec = unixSeconds;
     tv.tv_usec = 0;
     if (settimeofday(&tv, nullptr) != 0)
     {
@@ -809,19 +876,19 @@ bool TimeMgr::SetTimeFromNtp(uint32_t timeoutMs)
     }
 
     aon_timer_start_with_timeofday();
-    RefreshTimeZoneOffset(unixSeconds);
+    refreshTimeZoneOffset(unixSeconds);
     return true;
 #endif
 }
 
-bool TimeMgr::SetTimeFromGps(const std::string& gpsTime, const std::string& gpsDate)
+bool TimeMgr::setTimeFromGps(const std::string& gpsTime, const std::string& gpsDate)
 {
-    int hour   = 0;
+    int hour = 0;
     int minute = 0;
     int second = 0;
-    int year   = 0;
-    int month  = 0;
-    int day    = 0;
+    int year = 0;
+    int month = 0;
+    int day = 0;
 
     if (!parse_gprmc_time(gpsTime, hour, minute, second) || !parse_gprmc_date(gpsDate, year, month, day) || !is_valid_ymd(year, month, day))
     {
@@ -830,8 +897,8 @@ bool TimeMgr::SetTimeFromGps(const std::string& gpsTime, const std::string& gpsD
     }
 
     const std::time_t gpsUtc = utc_time_from_ymdhms(year, month, day, hour, minute, second);
-    timeval tv{};
-    tv.tv_sec  = gpsUtc;
+    timeval tv {};
+    tv.tv_sec = gpsUtc;
     tv.tv_usec = 0;
     if (settimeofday(&tv, nullptr) != 0)
     {
@@ -839,11 +906,11 @@ bool TimeMgr::SetTimeFromGps(const std::string& gpsTime, const std::string& gpsD
         return false;
     }
     aon_timer_start_with_timeofday();
-    RefreshTimeZoneOffset(gpsUtc);
+    refreshTimeZoneOffset(gpsUtc);
     return true;
 }
 
-bool TimeMgr::RefreshTimeZoneOffset(std::time_t whenUtc)
+bool TimeMgr::refreshTimeZoneOffset(std::time_t whenUtc)
 {
     const std::time_t timeToUse = (whenUtc != 0) ? whenUtc : static_cast<std::time_t>(CurrentEpochSeconds());
     if (timeToUse == 0)
@@ -853,7 +920,7 @@ bool TimeMgr::RefreshTimeZoneOffset(std::time_t whenUtc)
     }
 
     float offsetHours = 0.0f;
-    bool isDst        = false;
+    bool isDst = false;
     LogInfo("Resolving time zone offset for '" + m_timeZoneName + "' at UTC time " + std::to_string(timeToUse));
     if (!ResolveTimeZoneOffset(m_timeZoneName, timeToUse, offsetHours, &isDst))
     {
@@ -863,40 +930,229 @@ bool TimeMgr::RefreshTimeZoneOffset(std::time_t whenUtc)
     LogInfo("Resolved time zone offset: " + std::to_string(offsetHours) + " hours, DST: " + (isDst ? "yes" : "no"));
 
     m_timeZoneOffsetHours = offsetHours;
-    m_isDst               = isDst;
-    m_hasTimeZoneOffset   = true;
+    m_isDst = isDst;
+    m_hasTimeZoneOffset = true;
     return true;
 }
 
-bool TimeMgr::IsValid() const
+bool TimeMgr::isValid() const
 {
     return IsWallClockValid() && m_hasTimeZoneOffset;
 }
 
-bool TimeMgr::HasTimeZoneOffset() const
+bool TimeMgr::hasTimeZoneOffset() const
 {
     return m_hasTimeZoneOffset;
 }
 
-float TimeMgr::TimeZoneOffsetHours() const
+float TimeMgr::timeZoneOffsetHours() const
 {
     return m_timeZoneOffsetHours;
 }
 
-bool TimeMgr::IsDst() const
+bool TimeMgr::isDst() const
 {
     return m_isDst;
 }
 
-const std::string& TimeMgr::TimeZoneName() const
+const std::string& TimeMgr::timeZoneName() const
 {
     return m_timeZoneName;
 }
 
-void TimeMgr::SetTimeZoneName(std::string timeZoneName)
+void TimeMgr::setTimeZoneName(std::string timeZoneName)
 {
-    m_timeZoneName        = std::move(timeZoneName);
+    m_timeZoneName = std::move(timeZoneName);
     m_timeZoneOffsetHours = 0.0f;
-    m_isDst               = false;
-    m_hasTimeZoneOffset   = false;
+    m_isDst = false;
+    m_hasTimeZoneOffset = false;
+}
+
+DelayedRepeatingTimer::DelayedRepeatingTimer(uint32_t delayMs, uint32_t intervalMs, std::function<void()> callback)
+    : m_delayMs(delayMs),
+      m_intervalMs(intervalMs),
+      m_callback(std::move(callback)),
+      m_delayAlarmId(0),
+      m_repeatingTimer {},
+      m_repeatingActive(false),
+      m_running(false)
+{
+}
+
+DelayedRepeatingTimer::~DelayedRepeatingTimer()
+{
+    Stop();
+}
+
+void DelayedRepeatingTimer::Start()
+{
+    Stop();
+
+    m_running = true;
+    m_delayAlarmId = add_alarm_in_ms(m_delayMs, &DelayedRepeatingTimer::delayAlarmCallback, this, true);
+    if (m_delayAlarmId <= 0)
+    {
+        m_running = false;
+    }
+}
+
+void DelayedRepeatingTimer::Stop()
+{
+    if (m_delayAlarmId > 0)
+    {
+        cancel_alarm(m_delayAlarmId);
+        m_delayAlarmId = 0;
+    }
+
+    if (m_repeatingActive)
+    {
+        cancel_repeating_timer(&m_repeatingTimer);
+        m_repeatingActive = false;
+    }
+
+    m_running = false;
+}
+
+bool DelayedRepeatingTimer::IsRunning() const
+{
+    return m_running;
+}
+
+int64_t DelayedRepeatingTimer::delayAlarmCallback(alarm_id_t alarmId, void* pUserData)
+{
+    auto* pTimer = static_cast<DelayedRepeatingTimer*>(pUserData);
+    if (pTimer == nullptr)
+    {
+        return 0;
+    }
+    return pTimer->onDelayAlarm(alarmId);
+}
+
+bool DelayedRepeatingTimer::repeatingTimerCallback(repeating_timer* pRepeatingTimer)
+{
+    if (pRepeatingTimer == nullptr)
+    {
+        return false;
+    }
+
+    auto* pTimer = static_cast<DelayedRepeatingTimer*>(pRepeatingTimer->user_data);
+    if (pTimer == nullptr)
+    {
+        return false;
+    }
+
+    return pTimer->onRepeatingTick();
+}
+
+int64_t DelayedRepeatingTimer::onDelayAlarm(alarm_id_t alarmId)
+{
+    (void)alarmId;
+    m_delayAlarmId = 0;
+
+    if (!m_running)
+    {
+        return 0;
+    }
+
+    if (m_callback)
+    {
+        m_callback();
+    }
+
+    if (m_intervalMs == 0)
+    {
+        m_running = false;
+        return 0;
+    }
+
+    const int64_t intervalUs = -static_cast<int64_t>(m_intervalMs) * 1000;
+    m_repeatingActive = add_repeating_timer_us(intervalUs, &DelayedRepeatingTimer::repeatingTimerCallback, this, &m_repeatingTimer);
+    if (!m_repeatingActive)
+    {
+        m_running = false;
+    }
+
+    return 0;
+}
+
+bool DelayedRepeatingTimer::onRepeatingTick()
+{
+    if (!m_running)
+    {
+        m_repeatingActive = false;
+        return false;
+    }
+
+    if (m_callback)
+    {
+        m_callback();
+    }
+
+    return m_running;
+}
+
+//
+// AlarmaTimer implementation
+//
+AlarmTimer::AlarmTimer(std::function<void()> callback)
+    : m_callback(std::move(callback)),
+      m_alarmId(0),
+      m_running(false)
+{
+}
+
+AlarmTimer::~AlarmTimer()
+{
+    Stop();
+}
+
+void AlarmTimer::Start(uint32_t delayMs)
+{
+    Stop();
+
+    m_running = true;
+    m_alarmId = add_alarm_in_ms(delayMs, &AlarmTimer::alarmCallback, this, true);
+    if (m_alarmId <= 0)
+    {
+        m_running = false;
+    }
+}
+
+void AlarmTimer::Stop()
+{
+    if (m_alarmId > 0)
+    {
+        cancel_alarm(m_alarmId);
+        m_alarmId = 0;
+    }
+    m_running = false;
+}
+
+bool AlarmTimer::IsRunning() const
+{
+    return m_running;
+}
+
+int64_t AlarmTimer::alarmCallback(alarm_id_t alarmId, void* pUserData)
+{
+    auto* pTimer = static_cast<AlarmTimer*>(pUserData);
+    if (pTimer == nullptr)
+    {
+        return 0;
+    }
+    return pTimer->onAlarm(alarmId);
+}
+
+int64_t AlarmTimer::onAlarm(alarm_id_t alarmId)
+{
+    (void)alarmId;
+    m_alarmId = 0;
+    m_running = false;
+
+    if (m_callback)
+    {
+        m_callback();
+    }
+
+    return 0;
 }
