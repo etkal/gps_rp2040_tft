@@ -1,3 +1,17 @@
+# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
+if(WIN32)
+    set(USERHOME $ENV{USERPROFILE})
+else()
+    set(USERHOME $ENV{HOME})
+endif()
+set(sdkVersion 2.3.0)
+set(toolchainVersion 15_2_Rel1)
+set(picotoolVersion 2.3.0)
+set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
+if (EXISTS ${picoVscode})
+    include(${picoVscode})
+endif()
+# ====================================================================================
 cmake_minimum_required(VERSION 3.24)
 
 # Set the board type for pin and LED decisions
@@ -54,8 +68,9 @@ include(pico_sdk_import.cmake)
 
 project(gps_tft C CXX ASM)
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CXX_STANDARD 20)
+set(PICO_CXX_ENABLE_EXCEPTIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
 
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
