@@ -53,6 +53,11 @@ add_compile_definitions(USE_DST=AUTOMATIC)
 # Legacy fallback for simple numeric offsets
 add_compile_definitions(GMT_OFFSET=-4.0)
 
+# Adafruit breakout GPS modules support sending antenna status requests to the GPS device.
+# This is not needed for other modules, but it is mostly harmless to enable it (can cause
+# issues with some GPS modules). If you have issues, comment out the following line.
+#add_compile_definitions(SEND_ANTENNA_STATUS_REQUESTS) # Enable sending antenna status requests to the GPS device
+
 # Set pico platform definitions for conditional compilation
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)
     add_compile_definitions(PLATFORM_PICO_W)

@@ -52,9 +52,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <list>
 #include <memory>
-#include <pico/stdlib.h>
-#include <hardware/spi.h>
-#include <hardware/gpio.h>
+
+#include "pico/stdlib.h"
+#include "hardware/spi.h"
+#include "hardware/gpio.h"
+
 #include "framebuf.h"
 #include "font.h"
 
@@ -167,11 +169,11 @@ class ILI_TFT : public Framebuf
 public:
     typedef std::shared_ptr<ILI_TFT> Shared;
 
-    ILI_TFT(spi_inst_t* spi, uint8_t cs, uint8_t dc, uint8_t rst, ROTATION rotation = R0DEG);
+    ILI_TFT(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint dc, uint rst, uint bl, ROTATION rotation = R0DEG);
     virtual ~ILI_TFT() = default;
 
-    virtual void Reset()      = 0;
-    virtual void Initialize() = 0;
+    virtual void Reset() = 0;
+    virtual void Initialize();
 
     void Clear(uint16_t colour = COLOUR_BLACK); // Clear entire display via hardware access
     void SetQuadrant(QUADRANT eQuadrant);
@@ -266,10 +268,17 @@ protected:
     }
 
 protected:
+    // hardware pins
     spi_inst_t* m_spi = NULL;
-    uint8_t m_cs;
-    uint8_t m_dc;
-    uint8_t m_rst;
+    uint m_miso;
+    uint m_mosi;
+    uint m_sck;
+    uint m_cs;
+    uint m_dc;
+    uint m_rst;
+    uint m_bl;
+
+    // display properties
     uint16_t m_dispWidth;
     uint16_t m_dispHeight;
     ROTATION m_rotation;
@@ -288,7 +297,7 @@ protected:
 class ILI934X : public ILI_TFT
 {
 public:
-    ILI934X(spi_inst_t* spi, uint8_t cs, uint8_t dc, uint8_t rst, ROTATION rotation = R0DEG);
+    ILI934X(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint dc, uint rst, uint bl, ROTATION rotation = R0DEG);
     virtual ~ILI934X() = default;
 
     void Initialize() override;
@@ -306,7 +315,7 @@ private:
 class ILI948X : public ILI_TFT
 {
 public:
-    ILI948X(spi_inst_t* spi, uint8_t cs, uint8_t dc, uint8_t rst, ROTATION rotation = R0DEG);
+    ILI948X(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint dc, uint rst, uint bl, ROTATION rotation = R0DEG);
     virtual ~ILI948X() = default;
 
     void Initialize() override;
@@ -324,7 +333,7 @@ private:
 class ST7796 : public ILI_TFT
 {
 public:
-    ST7796(spi_inst_t* spi, uint8_t cs, uint8_t dc, uint8_t rst, ROTATION rotation = R0DEG);
+    ST7796(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint dc, uint rst, uint bl, ROTATION rotation = R0DEG);
     virtual ~ST7796() = default;
 
     void Initialize() override;

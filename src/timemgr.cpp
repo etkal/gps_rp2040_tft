@@ -14,7 +14,6 @@
 #include <cstring>
 #include <ctime>
 #include <iomanip>
-#include <iostream>
 #include <sstream>
 #include <chrono>
 #include <sys/time.h>
@@ -478,6 +477,7 @@ namespace
     }
 } // namespace
 
+// Static member declarations
 TimeMgr::Shared TimeMgr::sm_spTimeMgr;
 
 TimeMgr::Shared TimeMgr::GetInstance()
@@ -731,7 +731,11 @@ std::string TimeMgr::FormatCurrentTimeHMS()
 
 void TimeMgr::LogInfo(const std::string& message)
 {
-    std::cout << '[' << FormatCurrentTimestamp() << "] " << message << std::endl;
+    std::stringstream ss;
+    ss << "<" << get_core_num() << ">[" << FormatCurrentTimestamp() << "] " << message << std::endl;
+    std::string formattedMessage = ss.str();
+    // printf is supposedly thread-safe on the pico, so we can use it for logging from multiple threads.
+    printf("%s", formattedMessage.c_str());
 }
 
 TimeMgr::TimeMgr(std::string timeZoneName)
@@ -968,7 +972,7 @@ void TimeMgr::setTimeZoneName(std::string timeZoneName)
     m_hasTimeZoneOffset = false;
 }
 
-DelayedRepeatingTimer::DelayedRepeatingTimer(uint32_t delayMs, uint32_t intervalMs, std::function<void()> callback)
+DelayedRepeatingTimer::DelayedRepeatingTimer(uint32_t delayMs, uint32_t intervalMs, std::function<void()> callback, alarm_pool_t* pAlarmPool)
     : m_delayMs(delayMs),
       m_intervalMs(intervalMs),
       m_callback(std::move(callback)),
@@ -977,6 +981,14 @@ DelayedRepeatingTimer::DelayedRepeatingTimer(uint32_t delayMs, uint32_t interval
       m_repeatingActive(false),
       m_running(false)
 {
+    if (nullptr != pAlarmPool)
+    {
+        m_pAlarmPool = pAlarmPool;
+    }
+    else
+    {
+        m_pAlarmPool = alarm_pool_get_default();
+    }
 }
 
 DelayedRepeatingTimer::~DelayedRepeatingTimer()
@@ -989,7 +1001,7 @@ void DelayedRepeatingTimer::Start()
     Stop();
 
     m_running = true;
-    m_delayAlarmId = add_alarm_in_ms(m_delayMs, &DelayedRepeatingTimer::delayAlarmCallback, this, true);
+    m_delayAlarmId = alarm_pool_add_alarm_in_ms(m_pAlarmPool, m_delayMs, &DelayedRepeatingTimer::delayAlarmCallback, this, true);
     if (m_delayAlarmId <= 0)
     {
         m_running = false;
@@ -1000,7 +1012,7 @@ void DelayedRepeatingTimer::Stop()
 {
     if (m_delayAlarmId > 0)
     {
-        cancel_alarm(m_delayAlarmId);
+        alarm_pool_cancel_alarm(m_pAlarmPool, m_delayAlarmId);
         m_delayAlarmId = 0;
     }
 
@@ -1066,7 +1078,11 @@ int64_t DelayedRepeatingTimer::onDelayAlarm(alarm_id_t alarmId)
     }
 
     const int64_t intervalUs = -static_cast<int64_t>(m_intervalMs) * 1000;
-    m_repeatingActive = add_repeating_timer_us(intervalUs, &DelayedRepeatingTimer::repeatingTimerCallback, this, &m_repeatingTimer);
+    m_repeatingActive = alarm_pool_add_repeating_timer_us(m_pAlarmPool,
+                                                          intervalUs,
+                                                          &DelayedRepeatingTimer::repeatingTimerCallback,
+                                                          this,
+                                                          &m_repeatingTimer);
     if (!m_repeatingActive)
     {
         m_running = false;
@@ -1094,11 +1110,19 @@ bool DelayedRepeatingTimer::onRepeatingTick()
 //
 // AlarmaTimer implementation
 //
-AlarmTimer::AlarmTimer(std::function<void()> callback)
+AlarmTimer::AlarmTimer(std::function<void()> callback, alarm_pool_t* pAlarmPool)
     : m_callback(std::move(callback)),
       m_alarmId(0),
       m_running(false)
 {
+    if (nullptr != pAlarmPool)
+    {
+        m_pAlarmPool = pAlarmPool;
+    }
+    else
+    {
+        m_pAlarmPool = alarm_pool_get_default();
+    }
 }
 
 AlarmTimer::~AlarmTimer()
@@ -1109,9 +1133,8 @@ AlarmTimer::~AlarmTimer()
 void AlarmTimer::Start(uint32_t delayMs)
 {
     Stop();
-
     m_running = true;
-    m_alarmId = add_alarm_in_ms(delayMs, &AlarmTimer::alarmCallback, this, true);
+    m_alarmId = alarm_pool_add_alarm_in_ms(m_pAlarmPool, delayMs, &AlarmTimer::alarmCallback, this, true);
     if (m_alarmId <= 0)
     {
         m_running = false;
@@ -1122,7 +1145,7 @@ void AlarmTimer::Stop()
 {
     if (m_alarmId > 0)
     {
-        cancel_alarm(m_alarmId);
+        alarm_pool_cancel_alarm(m_pAlarmPool, m_alarmId);
         m_alarmId = 0;
     }
     m_running = false;

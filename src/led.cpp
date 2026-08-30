@@ -5,11 +5,11 @@
  *
  */
 
-#include "pico/stdlib.h"
+#include "led.h"
+
 #if defined(PLATFORM_PICO_W)
 #include "pico/cyw43_arch.h"
 #endif
-#include "led.h"
 #include "ws2812.pio.h"
 
 static inline void put_pixel(uint32_t pixel_grb)

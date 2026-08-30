@@ -14,6 +14,7 @@
 #include <string>
 
 #include "pico/time.h"
+#include "pico/sync.h"
 
 // TimeMgr is a singleton class that manages wall-clock validity and time-zone offset state.
 // It provides methods to set the time from NTP or GPS, check if the wall-clock is valid,
@@ -83,7 +84,9 @@ inline void LogInfo(const std::string& message)
 class DelayedRepeatingTimer
 {
 public:
-    DelayedRepeatingTimer(uint32_t delayMs, uint32_t intervalMs, std::function<void()> callback);
+    typedef std::shared_ptr<DelayedRepeatingTimer> Shared;
+
+    DelayedRepeatingTimer(uint32_t delayMs, uint32_t intervalMs, std::function<void()> callback, alarm_pool_t* pAlarmPool = nullptr);
     ~DelayedRepeatingTimer();
 
     void Start();
@@ -100,6 +103,7 @@ private:
     uint32_t m_delayMs;
     uint32_t m_intervalMs;
     std::function<void()> m_callback;
+    alarm_pool_t* m_pAlarmPool;
     alarm_id_t m_delayAlarmId;
     repeating_timer m_repeatingTimer;
     bool m_repeatingActive;
@@ -110,7 +114,9 @@ private:
 class AlarmTimer
 {
 public:
-    explicit AlarmTimer(std::function<void()> callback);
+    typedef std::shared_ptr<AlarmTimer> Shared;
+
+    explicit AlarmTimer(std::function<void()> callback, alarm_pool_t* pAlarmPool = nullptr);
     ~AlarmTimer();
 
     void Start(uint32_t delayMs);
@@ -123,6 +129,7 @@ private:
     int64_t onAlarm(alarm_id_t alarmId);
 
     std::function<void()> m_callback;
+    alarm_pool_t* m_pAlarmPool;
     alarm_id_t m_alarmId;
     bool m_running;
 };

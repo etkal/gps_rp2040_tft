@@ -22,14 +22,13 @@
  * THE SOFTWARE.
  */
 
-#include <queue>
+#include "gps.h"
+
 #include <iostream>
 #include <iomanip>
 #include <cmath>
 
-#include "gps.h"
 #include "timemgr.h"
-#include <pico/sync.h>
 
 typedef enum eSentenceType
 {
@@ -54,101 +53,112 @@ static std::map<std::string, eSentenceType> g_SentenceTypeMap = {
     {"$PCD",   kPCD  },
 };
 
-static GPS* sg_pGPS = NULL;
-static uart_inst_t* sg_pUART = nullptr;
-
-// Static members for RX
-volatile char GPS::sm_szBuffer[GPS_BUFSIZE];
-volatile size_t GPS::sm_iNext = 0;
-std::queue<std::string> GPS::sm_qSentences;
-
-GPS::GPS(uart_inst_t* pUART0, uart_inst_t* pUART1)
-    : m_pUART0(pUART0),
-      m_pUART1(pUART1),
-      m_spSendGpsDataTimer(std::make_unique<AlarmTimer>([this]() {
-          m_nLastSendTimerFireMs = to_ms_since_boot(get_absolute_time());
-          m_bTuneSendDelayPending = true;
-          if (m_nLastGprmcRxMs < m_nLastGpggaRxMs)
-          {
-              m_bTimerFiredBeforeGprmc = true;
-              m_bSendGpsDataDeferredUntilGprmc = true;
-              return;
-          }
-          m_bSendGpsData = true;
-      }))
+GPS::GPS()
 {
 }
 
 GPS::~GPS()
 {
+    if (m_spSendDataTimer)
+    {
+        m_spSendDataTimer->Stop();
+        m_spSendDataTimer.reset();
+    }
+    if (m_spIdleTimer)
+    {
+        m_spIdleTimer->Stop();
+        m_spIdleTimer.reset();
+    }
+    if (m_pAlarmPool)
+    {
+        if (1 == get_core_num())
+        {
+            LogInfo("GPS::~GPS() - Deleting alarm pool for core 1");
+            alarm_pool_destroy(m_pAlarmPool);
+        }
+    }
 }
 
+// Set the callback for when a valid sentence is received. This can be used by a derived class
+// to echo the sentence to another UART.
 void GPS::SetSentenceCallback(void* pCtx, sentenceCallback pCB)
 {
     m_pSentenceCtx = pCtx;
     m_pSentenceCallBack = pCB;
 }
 
+// Set the callback for when new GPS data is desired to be sent, e.g. for display.
 void GPS::SetGpsDataCallback(void* pCtx, gpsDataCallback pCB)
 {
     m_pGpsDataCtx = pCtx;
     m_pGpsDataCallback = pCB;
 }
 
-void GPS::Run()
+void GPS::Initialize()
 {
-    // Set up GPS
-    uart_set_fifo_enabled(m_pUART0, false); // Disable FIFO to get immediate RX interrupts
-    sg_pGPS = this;                         // Allow interrupt handler to call us back
-    sg_pUART = m_pUART0;
-    int uartIRQ = m_pUART0 == uart0 ? UART0_IRQ : UART1_IRQ;
-    // Set up and enable the interrupt handler
-    irq_set_exclusive_handler(uartIRQ, on_uart_rx);
-    irq_set_enabled(uartIRQ, true);
-    // Now enable the UART to send interrupts - RX only
-    uart_set_irqs_enabled(m_pUART0, true, false);
-
-    std::string strSentence;
-    bool bSentAntennaCommands = false;
-    while (!m_bExit)
+    // If we are on core 1 we need to ensure timers fire on that core.
+    if (1 == get_core_num())
     {
-        tight_loop_contents();
+        LogInfo("GPS::Initialize() - Creating alarm pool for core 1");
+        m_pAlarmPool = alarm_pool_create(1, 16);
+    }
+    else
+    {
+        LogInfo("GPS::Initialize() - Using alarm pool for default core");
+        m_pAlarmPool = alarm_pool_get_default();
+    }
 
-        // Read sentence from GPS device
-        if (getSentence(strSentence))
-        {
-            bool bValidSentenceRead = processSentence(strSentence);
-
-            if (nullptr != m_pUART1 && bValidSentenceRead)
-            {
-                uart_puts(m_pUART1, strSentence.c_str()); // Echo to the listening port
-            }
-
-            if (!bSentAntennaCommands && bValidSentenceRead)
-            {
-                LogInfo("Sending antenna commands\n");
-                // Write commands to enable reporting external vs internal antenna.  We wait
-                // until some data is received to ensure the GPS has finished initializing.
-                std::string strPGCMD("$PGCMD,33,1*6C\r\n"); // Enable antenna output for PA6H
-                std::string strCDCMD("$CDCMD,33,1*7C\r\n"); // Enable antenna output for PA1616S
-                uart_puts(m_pUART0, strPGCMD.c_str());
-                uart_puts(m_pUART0, strCDCMD.c_str());
-                bSentAntennaCommands = true;
-            }
-        }
-
-        if (m_bSendGpsData)
-        {
-            tuneSendGpsDataDelay();
-            m_bSendGpsData = false;
+    // Create the timer for sending GPS data to the callback. This is not strictly necessary,
+    // but it allows us to wait for the rest of the sentences to arrive, e.g. GPGSV, before sending
+    // the data to the callback. Without a delay the display will update more quickly with the
+    // time information, but the satellite list may be stale, though that is not critical.
+    m_spSendDataTimer = std::make_shared<AlarmTimer>(
+        [this]() {
             if (NULL != m_pGpsDataCallback)
             {
                 (*m_pGpsDataCallback)(m_pGpsDataCtx, m_spGPSData);
             }
+        },
+        m_pAlarmPool);
+
+    // Create the idle timer to detect lack of GPS data. If no data is received for a period of time,
+    // we will clear the GPS data object so as to invalidate position information, etc.
+    m_spIdleTimer = std::make_shared<AlarmTimer>(
+        [this]() {
+            LogInfo("GPS - No GPS data received, clearing GPS data");
+            m_spGPSData.reset();
+        },
+        m_pAlarmPool);
+}
+
+// Main loop for processing GPS sentences. This function will run until Stop() is called.
+void GPS::Run()
+{
+    std::string strSentence;
+    while (!m_bExit)
+    {
+        // Read sentence from GPS device
+        if (getSentence(strSentence))
+        {
+            m_spIdleTimer->Start(5000);   // Start the idle timer to 5 seconds
+            processSentence(strSentence); // Process the sentence and update GPS data
+        }
+
+        if (m_bSendGpsData)
+        {
+            m_bSendGpsData = false;
+            m_spSendDataTimer->Start(0);
         }
     }
 }
 
+// Stop the GPS processing loop. This will cause Run() to return.
+void GPS::Stop()
+{
+    m_bExit = true;
+}
+
+// Handle a received sentence. This function will validate the sentence and update the GPS data accordingly.
 bool GPS::processSentence(std::string strSentence)
 {
     // Validate the string
@@ -156,28 +166,25 @@ bool GPS::processSentence(std::string strSentence)
     {
         return false;
     }
-    LogInfo("Received: " + strSentence);
 
+    LogInfo("Received: " + strSentence); // Log the full received sentence for debugging purposes
+
+    // Call the sentence callback if set
     if (NULL != m_pSentenceCallBack)
     {
-        (*m_pSentenceCallBack)(m_pSentenceCtx, strSentence);
+        (*m_pSentenceCallBack)(m_pSentenceCtx, strSentence + "\r\n");
     }
 
     if (!m_spGPSData)
     {
-        // Guarantee we have an object to update
+        // Guarantee we have an object to update. This object persist across sentences so as to
+        // maintain the satellite list and other data that may not be present in every sentence.
         m_spGPSData = std::make_shared<GPSData>();
         m_spGPSData->mSatList = m_mSatListPersistent; // restore any previous data
     }
 
-    std::vector<std::string> vElems;
-    std::stringstream s_stream(strSentence);
-    while (s_stream.good())
-    {
-        std::string substr;
-        getline(s_stream, substr, ','); // get first string delimited by comma
-        vElems.push_back(substr);
-    }
+    // At this point we have a valid sentence, so we can parse it and update the GPS data object.
+    GPSSentence vElems(strSentence.substr(0, strSentence.find('*'))); // Exclude the checksum for parsing
 
     if (time_us_64() > m_nSatListTime + 30 * 1000 * 1000) // Nothing in 30 seconds, clear vectors
     {
@@ -189,7 +196,7 @@ bool GPS::processSentence(std::string strSentence)
         }
     }
 
-    if (vElems.size() == 0)
+    if (vElems[0].empty())
     {
         LogInfo("No elements found\n");
         return false;
@@ -197,7 +204,8 @@ bool GPS::processSentence(std::string strSentence)
 
     if (g_SentenceTypeMap.find(vElems[0]) == g_SentenceTypeMap.end())
     {
-        return false;
+        // LogInfo("Unknown sentence type: " + vElems[0]);
+        return true; // Not an error, just not handled
     }
 
     auto type = g_SentenceTypeMap.at(vElems[0]);
@@ -212,15 +220,33 @@ bool GPS::processSentence(std::string strSentence)
     {
     case kGPGGA: // Global Positioning System Fix Data
     {
-        m_nLastGpggaRxMs = to_ms_since_boot(get_absolute_time());
-        if (m_spSendGpsDataTimer)
+        // Check for updated time. If different then this is the first time-containing sentence
+        // and we should schedule an update of the GPS data and send it to the callback so as that
+        // the UI clock be as correct as possible, within reason. The GPRMC handler has this same
+        // logic in case (as with some GPS modules) that one comes first.
+        if (!vElems[1].empty() && vElems[1].length() >= 6)
         {
-            m_spSendGpsDataTimer->Start(m_nSendGpsDataDelayMs);
+            std::string t = vElems[1];
+            if (t != m_spGPSData->strGPSTimeRaw)
+            {
+                // The time value has changed.
+                m_bSendGpsData = true;
+            }
+            m_spGPSData->strGPSTime = t.substr(0, 2) + ":" + t.substr(2, 2) + ":" + t.substr(4, 2) + "Z";
+            m_spGPSData->strGPSTimeRaw = t;
         }
-
+        else
+        {
+            m_spGPSData->strGPSTime = "";
+            m_spGPSData->strGPSTimeRaw.clear();
+        }
         if (!vElems[7].empty())
         {
             m_spGPSData->strNumSats = "Sat: " + vElems[7];
+        }
+        else
+        {
+            m_spGPSData->strNumSats = "";
         }
         if (!vElems[9].empty())
         {
@@ -235,6 +261,10 @@ bool GPS::processSentence(std::string strSentence)
                 oss << std::setfill(' ') << std::setprecision(0) << dMeters << "m";
             }
             m_spGPSData->strAltitude = oss.str();
+        }
+        else
+        {
+            m_spGPSData->strAltitude = "";
         }
         break;
     }
@@ -299,19 +329,14 @@ bool GPS::processSentence(std::string strSentence)
     }
     case kGPRMC: // Recommended minimum specific GPS/Transit data
     {
-        m_nLastGprmcRxMs = to_ms_since_boot(get_absolute_time());
-        if (m_bSendGpsDataDeferredUntilGprmc)
+        // See the GPGGA case for the same logic regarding time. This is here in case the GPRMC sentence comes first.
+        if (!vElems[1].empty() && vElems[1].length() >= 6)
         {
-            m_bSendGpsDataDeferredUntilGprmc = false;
-            if (m_spSendGpsDataTimer)
+            std::string t = vElems[1];
+            if (t != m_spGPSData->strGPSTimeRaw)
             {
-                // Timer fired before GPRMC for this cycle; send shortly after GPRMC to avoid stale UI updates.
-                m_spSendGpsDataTimer->Start(10);
+                m_bSendGpsData = true;
             }
-        }
-        if (!vElems[1].empty())
-        {
-            std::string& t = vElems[1];
             m_spGPSData->strGPSTime = t.substr(0, 2) + ":" + t.substr(2, 2) + ":" + t.substr(4, 2) + "Z";
             m_spGPSData->strGPSTimeRaw = t;
         }
@@ -357,6 +382,9 @@ bool GPS::processSentence(std::string strSentence)
         else
         {
             m_spGPSData->bHasPosition = false;
+            m_spGPSData->strLatitude.clear();
+            m_spGPSData->strLongitude.clear();
+            m_spGPSData->strSpeed.clear();
         }
         break;
     }
@@ -390,120 +418,49 @@ bool GPS::processSentence(std::string strSentence)
     return true;
 }
 
-void GPS::tuneSendGpsDataDelay()
-{
-    if (!m_bTuneSendDelayPending)
-    {
-        return;
-    }
-    m_bTuneSendDelayPending = false;
-
-    constexpr uint32_t kTargetAfterGpggaMs = 700;
-    constexpr uint32_t kPreGprmcStepMs = 25;
-    constexpr uint32_t kRecoveryStepMs = 1;
-    constexpr uint32_t kRecoveryWindowCycles = 20;
-    constexpr uint32_t kMinDelayMs = 50;
-    constexpr uint32_t kMaxDelayMs = 1200;
-#if !defined(NDEBUG)
-    static uint32_t s_tuneLogCounter = 0;
-    static uint32_t s_deferredCountInWindow = 0;
-    static uint32_t s_deferredWindowStartMs = to_ms_since_boot(get_absolute_time());
-#endif
-    static uint32_t s_noEarlyFireCycles = 0;
-
-#if !defined(NDEBUG)
-
-    const uint32_t nowMs = to_ms_since_boot(get_absolute_time());
-    if (nowMs - s_deferredWindowStartMs >= 60000)
-    {
-        LogInfo("GPS delay tune: deferred_count_last_min=" + std::to_string(s_deferredCountInWindow));
-        s_deferredCountInWindow = 0;
-        s_deferredWindowStartMs = nowMs;
-    }
-#endif
-
-    // If the timer fired before this cycle's GPRMC, shift base delay later.
-    if (m_bTimerFiredBeforeGprmc)
-    {
-        m_bTimerFiredBeforeGprmc = false;
-        s_noEarlyFireCycles = 0;
-#if !defined(NDEBUG)
-        ++s_deferredCountInWindow;
-#endif
-        if (m_nSendGpsDataDelayMs + kPreGprmcStepMs > kMaxDelayMs)
-        {
-            m_nSendGpsDataDelayMs = kMaxDelayMs;
-        }
-        else
-        {
-            m_nSendGpsDataDelayMs += kPreGprmcStepMs;
-        }
-#if !defined(NDEBUG)
-        if ((++s_tuneLogCounter % 10) == 0)
-        {
-            LogInfo("GPS delay tune: deferred until GPRMC, delay_ms=" + std::to_string(m_nSendGpsDataDelayMs) +
-                    ", target_after_gpgga_ms=" + std::to_string(kTargetAfterGpggaMs));
-        }
-#endif
-        return;
-    }
-
-    ++s_noEarlyFireCycles;
-    int32_t adjustmentMs = 0;
-    if (m_nSendGpsDataDelayMs < kTargetAfterGpggaMs)
-    {
-        adjustmentMs = static_cast<int32_t>(kRecoveryStepMs);
-    }
-    else if (m_nSendGpsDataDelayMs > kTargetAfterGpggaMs && s_noEarlyFireCycles >= kRecoveryWindowCycles)
-    {
-        adjustmentMs = -static_cast<int32_t>(kRecoveryStepMs);
-        s_noEarlyFireCycles = 0;
-    }
-
-    int32_t newDelayMs = static_cast<int32_t>(m_nSendGpsDataDelayMs) + adjustmentMs;
-    if (newDelayMs < static_cast<int32_t>(kMinDelayMs))
-    {
-        newDelayMs = static_cast<int32_t>(kMinDelayMs);
-    }
-    else if (newDelayMs > static_cast<int32_t>(kMaxDelayMs))
-    {
-        newDelayMs = static_cast<int32_t>(kMaxDelayMs);
-    }
-    m_nSendGpsDataDelayMs = static_cast<uint32_t>(newDelayMs);
-
-#if !defined(NDEBUG)
-    if ((++s_tuneLogCounter % 10) == 0)
-    {
-        const uint32_t elapsedAfterGpggaMs = m_nLastSendTimerFireMs - m_nLastGpggaRxMs;
-        LogInfo("GPS delay tune: elapsed_after_gpgga_ms=" + std::to_string(elapsedAfterGpggaMs) +
-                ", target_after_gpgga_ms=" + std::to_string(kTargetAfterGpggaMs) +
-                ", no_early_cycles=" + std::to_string(s_noEarlyFireCycles) + ", delay_ms=" + std::to_string(m_nSendGpsDataDelayMs));
-    }
-#endif
-}
-
 bool GPS::validateSentence(std::string& strSentence)
 {
-    // Validate format and remove checksum and CRLF
+    // Validate format and remove CRLF
+    bool bValid = true;
+    std::string strReason;
     size_t nLen = strSentence.size();
     if (nLen < 1 || strSentence[0] != '$')
     {
-        return false;
+        strReason = " (no $)";
+        bValid = false;
     }
-    if (nLen < 6 || strSentence.substr(nLen - 2, 2) != "\r\n" || strSentence[nLen - 5] != '*')
+    else if (nLen < 6 || strSentence.substr(nLen - 2, 2) != "\r\n" || strSentence[nLen - 5] != '*')
     {
-        return false;
+        strReason = " (no CRLF or *)";
+        bValid = false;
     }
-    std::string specifiedCheck = strSentence.substr(nLen - 4, 2);
-    std::string calculatedCheck = checkSum(strSentence.substr(1, nLen - 6));
-    if (calculatedCheck != specifiedCheck)
+    else
     {
-        return false;
+        std::string specifiedCheck = strSentence.substr(nLen - 4, 2);
+        std::string calculatedCheck = checkSum(strSentence.substr(1, nLen - 6));
+        if (calculatedCheck != specifiedCheck)
+        {
+            strReason = " (checksum mismatch - rcvd: " + specifiedCheck + ", calc: " + calculatedCheck + ")";
+            bValid = false;
+        }
     }
 
-    strSentence = strSentence.substr(0, nLen - 5);
+    // Strip any CR/LF
+    if (nLen >= 2 && strSentence[nLen - 2] == '\r' && strSentence[nLen - 1] == '\n')
+    {
+        strSentence = strSentence.substr(0, nLen - 2);
+    }
+    else if (nLen >= 1 && (strSentence[nLen - 1] == '\r' || strSentence[nLen - 1] == '\n'))
+    {
+        strSentence = strSentence.substr(0, nLen - 1);
+    }
+    if (!bValid)
+    {
+        LogInfo("Validation failure: " + strSentence + strReason);
+        strSentence.clear();
+    }
 
-    return true;
+    return bValid;
 }
 
 std::string GPS::checkSum(const std::string& strSentence)
@@ -528,42 +485,4 @@ std::string GPS::convertToDegrees(std::string strRaw, int width)
     std::stringstream oss;
     oss << std::fixed << std::setw(width) << std::setfill(' ') << std::setprecision(4) << converted;
     return oss.str();
-}
-
-// RX interrupt handler
-void GPS::on_uart_rx()
-{
-    uart_set_irqs_enabled(sg_pUART, false, false);
-    while (uart_is_readable(sg_pUART))
-    {
-        char ch = uart_getc(sg_pUART);
-        sm_szBuffer[sm_iNext] = ch;
-        sm_iNext += 1;
-        if (sm_iNext >= GPS_BUFSIZE)
-        {
-            sm_iNext = 0; // wrap around, will sync up eventually
-        }
-        if (ch == '\n')
-        {
-            sm_szBuffer[sm_iNext] = '\0';
-            sm_qSentences.push(std::string((char*)sm_szBuffer));
-            sm_iNext = 0;
-        }
-    }
-    uart_set_irqs_enabled(sg_pUART, true, false);
-}
-
-bool GPS::getSentence(std::string& strSentence)
-{
-    bool bFound = false;
-    uart_set_irqs_enabled(sg_pUART, false, false);
-    if (!sm_qSentences.empty())
-    {
-        strSentence = sm_qSentences.front();
-        sm_qSentences.pop();
-        bFound = true;
-    }
-    uart_set_irqs_enabled(sg_pUART, true, false);
-
-    return bFound;
 }

@@ -7,8 +7,9 @@
 
 #pragma once
 
-#include "pico/stdlib.h"
 #include <memory>
+
+#include "pico/stdlib.h"
 #include "font.h"
 
 #if !defined(DISPLAY_COLOUR_FORMAT)
@@ -36,9 +37,9 @@ struct pixel666
 
     inline pixel666& operator=(const uint16_t& pixel565)
     {
-        uint8_t r      = (pixel565 >> 11) & 0x1f;
-        uint8_t g      = (pixel565 >> 5) & 0x3f;
-        uint8_t b      = pixel565 & 0x1f;
+        uint8_t r = (pixel565 >> 11) & 0x1f;
+        uint8_t g = (pixel565 >> 5) & 0x3f;
+        uint8_t b = pixel565 & 0x1f;
         b1 = r << 3;
         b2 = g << 2;
         b3 = b << 3;

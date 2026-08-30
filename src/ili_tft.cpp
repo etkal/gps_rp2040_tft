@@ -43,13 +43,14 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "stdlib.h"
-#include "stdio.h"
+#include "ili_tft.h"
+
+#include <stdlib.h>
+#include <stdio.h>
 #include <iostream>
 #include <cstring>
 #include <vector>
 
-#include "ili_tft.h"
 #include "hardware/gpio.h"
 
 #ifndef pgm_read_byte
@@ -68,11 +69,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     a = a + (~b) + 1;
 #endif
 
-ILI_TFT::ILI_TFT(spi_inst_t* spi, uint8_t cs, uint8_t dc, uint8_t rst, ROTATION rotation)
+ILI_TFT::ILI_TFT(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint dc, uint rst, uint bl, ROTATION rotation)
     : m_spi(spi),
+      m_miso(miso),
+      m_mosi(mosi),
+      m_sck(sck),
       m_cs(cs),
       m_dc(dc),
       m_rst(rst),
+      m_bl(bl),
       m_dispWidth(0),
       m_dispHeight(0),
       m_rotation(rotation),
@@ -94,9 +99,34 @@ ILI_TFT::ILI_TFT(spi_inst_t* spi, uint8_t cs, uint8_t dc, uint8_t rst, ROTATION 
     }
 }
 
+void ILI_TFT::Initialize()
+{
+    // Base initialization for all ILI TFT displays. Derived classes will implement the specific initialization
+    // sequence for the display type.
+    spi_init(m_spi, DISPLAY_SPI_SPEED);
+    gpio_set_function(m_miso, GPIO_FUNC_SPI);
+    gpio_set_function(m_sck, GPIO_FUNC_SPI);
+    gpio_set_function(m_mosi, GPIO_FUNC_SPI);
+    gpio_init(m_cs);
+    gpio_set_dir(m_cs, GPIO_OUT);
+    gpio_put(m_cs, 1);
+    gpio_init(m_dc);
+    gpio_set_dir(m_dc, GPIO_OUT);
+    gpio_init(m_rst);
+    gpio_set_dir(m_rst, GPIO_OUT);
+
+    // Enable display. Can also just tie the display enable line to 3v3.
+    if (0 != m_bl)
+    {
+        gpio_init(m_bl);
+        gpio_set_dir(m_bl, GPIO_OUT);
+        gpio_put(m_bl, 1);
+    }
+}
+
 #if defined(DISPLAY_ILI934X)
-ILI934X::ILI934X(spi_inst_t* spi, uint8_t cs, uint8_t dc, uint8_t rst, ROTATION rotation)
-    : ILI_TFT(spi, cs, dc, rst, rotation)
+ILI934X::ILI934X(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint dc, uint rst, uint bl, ROTATION rotation)
+    : ILI_TFT(spi, miso, mosi, sck, cs, dc, rst, bl, rotation)
 {
 }
 
@@ -112,6 +142,7 @@ void ILI934X::Reset()
 
 void ILI934X::Initialize()
 {
+    ILI_TFT::Initialize();
     setRotation(ILI934X_HW_WIDTH, ILI934X_HW_HEIGHT, m_rotation); // Sets width, height and MADCTL value
     createFramebuf();
 
@@ -161,8 +192,8 @@ void ILI934X::sendFramebufferData(uint8_t* data, size_t dataLen)
 #endif // DISPLAY_ILI934X
 
 #if defined(DISPLAY_ILI948X)
-ILI948X::ILI948X(spi_inst_t* spi, uint8_t cs, uint8_t dc, uint8_t rst, ROTATION rotation)
-    : ILI_TFT(spi, cs, dc, rst, rotation)
+ILI948X::ILI948X(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint dc, uint rst, uint bl, ROTATION rotation)
+    : ILI_TFT(spi, miso, mosi, sck, cs, dc, rst, bl, rotation)
 {
 }
 
@@ -178,6 +209,7 @@ void ILI948X::Reset()
 
 void ILI948X::Initialize()
 {
+    ILI_TFT::Initialize();
     setRotation(ILI948X_HW_WIDTH, ILI948X_HW_HEIGHT, m_rotation); // Sets width, height and MADCTL value
     createFramebuf();
 
@@ -217,8 +249,8 @@ void ILI948X::sendFramebufferData(uint8_t* data, size_t dataLen)
 #endif // DISPLAY_ILI948X
 
 #if defined(DISPLAY_ST7796)
-ST7796::ST7796(spi_inst_t* spi, uint8_t cs, uint8_t dc, uint8_t rst, ROTATION rotation)
-    : ILI_TFT(spi, cs, dc, rst, rotation)
+ST7796::ST7796(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint dc, uint rst, uint bl, ROTATION rotation)
+    : ILI_TFT(spi, miso, mosi, sck, cs, dc, rst, bl, rotation)
 {
 }
 
@@ -234,6 +266,7 @@ void ST7796::Reset()
 
 void ST7796::Initialize()
 {
+    ILI_TFT::Initialize();
     setRotation(ST7796_HW_WIDTH, ST7796_HW_HEIGHT, m_rotation); // Sets width, height and MADCTL value
     createFramebuf();
 
@@ -329,41 +362,41 @@ void ILI_TFT::setRotation(uint16_t screenWidth, uint16_t screenHeight, ROTATION 
     {
     case R0DEG:
         m_madctl |= MADCTL_MX;
-        m_dispWidth  = screenWidth;
+        m_dispWidth = screenWidth;
         m_dispHeight = screenHeight;
         break;
     case R90DEG:
         m_madctl |= MADCTL_MV;
-        m_dispWidth  = screenHeight;
+        m_dispWidth = screenHeight;
         m_dispHeight = screenWidth;
         break;
     case R180DEG:
         m_madctl |= MADCTL_MY;
-        m_dispWidth  = screenWidth;
+        m_dispWidth = screenWidth;
         m_dispHeight = screenHeight;
         break;
     case R270DEG:
         m_madctl |= (MADCTL_MY | MADCTL_MX | MADCTL_MV);
-        m_dispWidth  = screenHeight;
+        m_dispWidth = screenHeight;
         m_dispHeight = screenWidth;
         break;
     case MIRRORED0DEG:
         m_madctl |= MADCTL_MY | MADCTL_MX;
-        m_dispWidth  = screenWidth;
+        m_dispWidth = screenWidth;
         m_dispHeight = screenHeight;
         break;
     case MIRRORED90DEG:
         m_madctl |= (MADCTL_MX | MADCTL_MV);
-        m_dispWidth  = screenHeight;
+        m_dispWidth = screenHeight;
         m_dispHeight = screenWidth;
         break;
     case MIRRORED180DEG:
-        m_dispWidth  = screenWidth;
+        m_dispWidth = screenWidth;
         m_dispHeight = screenHeight;
         break;
     case MIRRORED270DEG:
         m_madctl |= (MADCTL_MY | MADCTL_MV);
-        m_dispWidth  = screenHeight;
+        m_dispWidth = screenHeight;
         m_dispHeight = screenWidth;
         break;
     }
@@ -508,7 +541,7 @@ void ILI_TFT::Show(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
     {
         return;
     }
-    size_t bytesPerLine     = static_cast<size_t>(_w) * bytesPerPixel;
+    size_t bytesPerLine = static_cast<size_t>(_w) * bytesPerPixel;
     size_t chunkBufferBytes = sizeof(tgtBuffer);
 
     // Fallback path if a single line does not fit in the staging buffer.
@@ -528,7 +561,7 @@ void ILI_TFT::Show(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
     {
         linesPerChunk = 1;
     }
-    uint16_t numChunks     = _h / linesPerChunk;
+    uint16_t numChunks = _h / linesPerChunk;
     uint16_t linesLeftover = _h - numChunks * linesPerChunk;
 
     // Tell the display where we are going to write the data

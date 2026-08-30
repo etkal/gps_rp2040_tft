@@ -22,20 +22,19 @@
  * THE SOFTWARE.
  */
 
+#include "gps_tft.h"
+
 #include <stdio.h>
 #include <string>
 #include <iostream>
-#include <pico/double.h>
 #include <math.h>
 #include <iomanip>
 
 #include "pico/stdlib.h"
+#include "pico/double.h"
 #include "pico/multicore.h"
-#include "hardware/gpio.h"
-#include "hardware/uart.h"
 
 #include "ili_tft.h"
-#include "gps_tft.h"
 #include "power_status.h"
 #include "font_factory.h"
 
@@ -89,12 +88,9 @@ void GPS_TFT::Initialize()
 
     // Initialize display
     m_spDisplay->SetFont(get_recommended_font(nFontSize));
-    auto nQuadrant = m_spDisplay->GetQuadrants().front();
-    m_spDisplay->SetQuadrant(nQuadrant);
-    drawText(0, "Waiting for GPS", COLOUR_WHITE, false, 0);
-    m_spDisplay->Show();
 
-    m_spGPS->SetSentenceCallback(this, sentenceCB);
+    showWaitingForGPS();
+
     m_spGPS->SetGpsDataCallback(this, gpsDataCB);
 }
 
@@ -104,40 +100,45 @@ void GPS_TFT::Run()
     static auto sm_spGPS = m_spGPS; // Capture shared pointer for use in lambda
     multicore_launch_core1([]() {
         GPS::Shared spGPS = sm_spGPS;
+        // Initialize and run the GPS processing loop on core 1
+        LogInfo("Starting GPS processing on core 1");
+        spGPS->Initialize();
         spGPS->Run();
+    });
+
+    m_spIdleTimer = std::make_shared<AlarmTimer>([this]() {
+        LogInfo("GPS_TFT - No GPS data received showing waiting message");
+        showWaitingForGPS();
     });
 
     // Main loop for updating the display
     while (true)
     {
-        sleep_ms(10); // Sleep for 10ms to avoid busy waiting
+        busy_wait_ms(10); // Sleep for 10ms to avoid busy waiting
 
         bool bHasQueuedGpsData = false;
+        GPSData::Shared spGPSData;
         // Check if we have new GPS data to display, just take the most recent one and discard the rest to avoid UI lag
         critical_section_enter_blocking(&m_GpsDataCallbackCS);
         if (!m_qGPSData.empty())
         {
             bHasQueuedGpsData = true;
-            m_spGPSData = m_qGPSData.back();
             while (!m_qGPSData.empty())
             {
+                spGPSData = m_qGPSData.front();
                 m_qGPSData.pop();
             }
         }
         critical_section_exit(&m_GpsDataCallbackCS);
 
-        if (bHasQueuedGpsData && m_spGPSData)
+        if (bHasQueuedGpsData && spGPSData)
         {
             LogInfo("GPS_TFT - Updating UI");
-            updateUI(m_spGPSData);
-            m_spGPSData.reset(); // Free the data
+            updateUI(spGPSData);
+            spGPSData.reset(); // Free the data
+            m_spIdleTimer->Start(10000); // Reset the idle timer to 10 seconds
         }
     }
-}
-
-void GPS_TFT::sentenceCB(void* pCtx, std::string strSentence)
-{
-    // LogInfo("sentenceCB received: " + strSentence);
 }
 
 void GPS_TFT::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
@@ -161,6 +162,16 @@ void GPS_TFT::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
     critical_section_exit(&pThis->m_GpsDataCallbackCS);
 }
 
+void GPS_TFT::showWaitingForGPS()
+{
+    m_spDisplay->Clear(COLOUR_BLACK);
+    auto nQuadrant = m_spDisplay->GetQuadrants().front();
+    m_spDisplay->SetQuadrant(nQuadrant);
+    drawText(0, "Waiting for GPS", COLOUR_RED, false, 0);
+    m_spDisplay->Show();
+}
+
+// Update the UI with the latest GPS data.
 void GPS_TFT::updateUI(GPSData::Shared spGPSData)
 {
     m_spGPSData = spGPSData;
@@ -177,14 +188,15 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
         m_spLED->Blink_ms(20);
     }
 
-    // Update the time if necessary
+    // Update the system time if necessary
     if (!m_spGPSData->strGPSTimeRaw.empty() && !m_spGPSData->strGPSDateRaw.empty())
     {
         const uint64_t uptimeSec = time_us_64() / 1000000;
         const bool bNeverRetried = (m_nLastTimeSyncAttemptSec == std::numeric_limits<uint64_t>::max());
-        const bool bRetryDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
-                               (uptimeSec - m_nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec);
-        if (bRetryDue)
+        const bool bUpdateDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
+                                (uptimeSec - m_nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec) ||
+                                !TimeMgr::IsGpsTimeDateWithinOneSecond(m_spGPSData->strGPSTimeRaw, m_spGPSData->strGPSDateRaw);
+        if (bUpdateDue)
         {
             m_nLastTimeSyncAttemptSec = uptimeSec;
             LogInfo("Attempting GPS time sync");
@@ -208,7 +220,7 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
     uint X_PAD = PAD_CHARS_X * getCharWidth();
     uint Y_PAD = PAD_CHARS_Y * getCharHeight();
 
-#if defined(PLATFORM_PICO)
+#if defined(PLATFORM_PICO) // Only the Raspberry Pi Pico has a VSYS voltage monitor
     float vsys = 0.0;
     bool bBattery = false;
     std::string strVsys;
@@ -295,12 +307,11 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
         m_spDisplay->Show();
     }
     showTime = time_us_64() - startTime;
-
     m_spGPSData.reset();
 
     LogInfo("Frame show: " + std::to_string(showTime / 1000) + "ms");
 #if !defined(NDEBUG)
-    std::cout << "Total Heap: " << getTotalHeap() << "  Free Heap: " << getFreeHeap() << std::endl;
+    LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));
 #endif
 }
 
