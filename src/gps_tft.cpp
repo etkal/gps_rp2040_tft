@@ -135,7 +135,7 @@ void GPS_TFT::Run()
         {
             LogInfo("GPS_TFT - Updating UI");
             updateUI(spGPSData);
-            spGPSData.reset(); // Free the data
+            spGPSData.reset();           // Free the data
             m_spIdleTimer->Start(10000); // Reset the idle timer to 10 seconds
         }
     }
@@ -234,8 +234,10 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
     }
 #endif
 
+#if !defined(NDEBUG)
     auto startTime = time_us_64();
     static uint64_t showTime = 0;
+#endif
 
     for (auto nQuadrant : m_spDisplay->GetQuadrants())
     {
@@ -306,11 +308,11 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
         // blit the framebuf to the display quadrant
         m_spDisplay->Show();
     }
-    showTime = time_us_64() - startTime;
     m_spGPSData.reset();
 
-    LogInfo("Frame show: " + std::to_string(showTime / 1000) + "ms");
 #if !defined(NDEBUG)
+    showTime = time_us_64() - startTime;
+    LogInfo("Frame show: " + std::to_string(showTime / 1000) + "ms");
     LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));
 #endif
 }

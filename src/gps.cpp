@@ -53,6 +53,11 @@ static std::map<std::string, eSentenceType> g_SentenceTypeMap = {
     {"$PCD",   kPCD  },
 };
 
+namespace
+{
+    constexpr uint32_t gpsDataPublishDelayMs = 0;
+}
+
 GPS::GPS()
 {
 }
@@ -147,7 +152,7 @@ void GPS::Run()
         if (m_bSendGpsData)
         {
             m_bSendGpsData = false;
-            m_spSendDataTimer->Start(0);
+            m_spSendDataTimer->Start(gpsDataPublishDelayMs);
         }
     }
 }

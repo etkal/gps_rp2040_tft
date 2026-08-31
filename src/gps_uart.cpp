@@ -127,14 +127,23 @@ void GPS_UART::Initialize()
 
 #if defined(SEND_ANTENNA_STATUS_REQUESTS)
     // Set up a timer to send antenna status commands to the GPS device every 30 seconds, starting after 2 seconds.
+    // We only use this to set a flag in the GPS_UART class, which is then used as sentences are received to attempt
+    // to send the antenna status commands. This is done to avoid sending the commands while the GPS device is busy
+    // sending sentences, which can cause the GPS device behave badly.
     m_spSendAntennaStatusTimer = std::make_shared<DelayedRepeatingTimer>(
         2000,
         30000,
         [this]() {
-            sendExternalAntennaStatusRequest();
+            m_bSendAntennaStatus = true;
         },
         m_pAlarmPool);
     m_spSendAntennaStatusTimer->Start();
+    // Alarm timer to delay the sending of those sences.
+    m_spSendAntennaStatusAlarm = std::make_shared<AlarmTimer>(
+        [this]() {
+            sendExternalAntennaStatusRequest();
+        },
+        m_pAlarmPool);
 #endif
 
     LogInfo("GPS_UART initialization complete.");
@@ -152,9 +161,26 @@ void GPS_UART::sendExternalAntennaStatusRequest()
 }
 #endif
 
+// Use this callback from the base class in order to echo sentences received from the
+// GPS device to the output UART (if set).
 void GPS_UART::sentenceCB(void* pCtx, std::string strSentence)
 {
     GPS_UART* pThis = static_cast<GPS_UART*>(pCtx);
+
+#if defined(SEND_ANTENNA_STATUS_REQUESTS)
+    static uint64_t nLastSentenceTime = 0;
+    uint64_t nNow = time_us_64();
+    if (pThis->m_bSendAntennaStatus && nNow - nLastSentenceTime > 250000)
+    {
+        // We've detected a gap, assume this is the first sentence in a group, so delay the sending
+        // of the antenna status commands for 500 ms to attempt to send it after this group.
+        LogInfo("GPS_UART - Detected sentence gap, delaying antenna status commands");
+        pThis->m_spSendAntennaStatusAlarm->Start(500);
+        pThis->m_bSendAntennaStatus = false;
+    }
+    nLastSentenceTime = nNow;
+#endif
+
     if (nullptr != pThis->m_pUartOut)
     {
         uart_puts(pThis->m_pUartOut, strSentence.c_str()); // Echo to the listening port

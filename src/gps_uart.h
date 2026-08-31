@@ -65,6 +65,8 @@ private:
 
 #if defined(SEND_ANTENNA_STATUS_REQUESTS)
     DelayedRepeatingTimer::Shared m_spSendAntennaStatusTimer;
+    AlarmTimer::Shared m_spSendAntennaStatusAlarm;
+    bool m_bSendAntennaStatus {false};
 #endif
 
     // RX management

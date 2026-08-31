@@ -93,5 +93,5 @@ private:
     std::queue<GPSData::Shared> m_qGPSData; // Queue of GPS data to be processed by the display loop
     uint64_t m_nLastTimeSyncAttemptSec;
     critical_section m_GpsDataCallbackCS; // Protects access to GPS data queue
-    AlarmTimer::Shared m_spIdleTimer; // Timer to detect lack of GPS data
+    AlarmTimer::Shared m_spIdleTimer;     // Timer to detect lack of GPS data
 };

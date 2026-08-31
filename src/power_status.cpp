@@ -19,7 +19,8 @@
 // Pin used for ADC 0
 #define PICO_FIRST_ADC_PIN 26
 
-int power_source(bool *battery_powered) {
+int power_source(bool* battery_powered)
+{
 #if defined CYW43_WL_GPIO_VBUS_PIN
     *battery_powered = !cyw43_arch_gpio_get(CYW43_WL_GPIO_VBUS_PIN);
     return PICO_OK;
@@ -32,7 +33,8 @@ int power_source(bool *battery_powered) {
 #endif
 }
 
-int power_voltage(float *voltage_result) {
+int power_voltage(float* voltage_result)
+{
 #ifndef PICO_VSYS_PIN
     return PICO_ERROR_NO_DATA;
 #else
@@ -45,19 +47,21 @@ int power_voltage(float *voltage_result) {
     // setup adc
     adc_gpio_init(PICO_VSYS_PIN);
     adc_select_input(PICO_VSYS_PIN - PICO_FIRST_ADC_PIN);
- 
+
     adc_fifo_setup(true, false, 0, false, false);
     adc_run(true);
 
     // We seem to read low values initially - this seems to fix it
     int ignore_count = PICO_POWER_SAMPLE_COUNT;
-    while (!adc_fifo_is_empty() || ignore_count-- > 0) {
+    while (!adc_fifo_is_empty() || ignore_count-- > 0)
+    {
         (void)adc_fifo_get_blocking();
     }
 
     // read vsys
     uint32_t vsys = 0;
-    for(int i = 0; i < PICO_POWER_SAMPLE_COUNT; i++) {
+    for (int i = 0; i < PICO_POWER_SAMPLE_COUNT; i++)
+    {
         uint16_t val = adc_fifo_get_blocking();
         vsys += val;
     }
