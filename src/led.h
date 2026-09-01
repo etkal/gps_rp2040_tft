@@ -10,6 +10,8 @@
 #include <vector>
 #include <memory>
 
+#include "pico/stdlib.h"
+
 #if PICO_DEFAULT_LED_PIN_INVERTED
 auto constexpr LED_ON = 0;
 auto constexpr LED_OFF = 1;

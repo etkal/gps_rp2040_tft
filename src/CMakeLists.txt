@@ -7,6 +7,7 @@ target_sources(gps_tft PUBLIC
     framebuf.cpp
     gps_tft.cpp
     gps.cpp
+    gps_uart.cpp
     ili_tft.cpp
     led.cpp
     main.cpp

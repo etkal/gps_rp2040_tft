@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-#ifndef POWER_STATUS_H
-#define POWER_STATUS_H
+#pragma once
 
 /*!
  * \brief Get power source
@@ -17,7 +16,7 @@
  * \return Zero if the battery status can be determined, an error code otherwise \see pico_error_codes
  */
 
-int power_source(bool *battery_powered);
+int power_source(bool* battery_powered);
 
 /*!
  * \brief Get system voltage
@@ -28,6 +27,4 @@ int power_source(bool *battery_powered);
  * \param voltage Calculated voltage
  * \return Zero if the voltage can be determined, an error code otherwise \see pico_error_codes
  */
-int power_voltage(float *voltage);
-
-#endif
+int power_voltage(float* voltage);

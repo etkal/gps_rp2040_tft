@@ -21,13 +21,14 @@
  */
 
 #include <iostream>
-#include <pico/stdlib.h>
-#include "hardware/adc.h"
 
+#include "pico/stdlib.h"
+#include "hardware/adc.h"
 #if defined(PLATFORM_PICO_W)
 #include "pico/cyw43_arch.h"
 #endif
 
+#include "gps_uart.h"
 #include "gps_tft.h"
 #include "font_factory.h"
 #include "timemgr.h"
@@ -36,7 +37,7 @@
 #define PIN_UART0_TX PICO_DEFAULT_UART_TX_PIN // Default is 0
 #define PIN_UART0_RX PICO_DEFAULT_UART_RX_PIN // Default is 1
 
-#if defined(WAVESHARE_RP2040_ZERO)
+#if defined(WAVESHARE_RP2040_ZERO) || defined(PLATFORM_PICO)
 #define UART1_DEVICE uart1 // uart1 for echo
 #define PIN_UART1_TX 4
 #define PIN_UART1_RX 5
@@ -119,41 +120,8 @@ int main()
     sleep_ms(5000);
 #endif
 
-    // Set up UART for GPS device
-    uart_init(UART0_DEVICE, UART_BAUD_RATE);
-    gpio_set_function(PIN_UART0_TX, GPIO_FUNC_UART);
-    gpio_set_function(PIN_UART0_RX, GPIO_FUNC_UART);
-    uart_set_hw_flow(UART0_DEVICE, false, false);
-    uart_set_format(UART0_DEVICE, DATA_BITS, STOP_BITS, PARITY);
-
-#if defined(UART1_DEVICE)
-    // Set up UART for echo device
-    uart_init(UART1_DEVICE, UART_BAUD_RATE);
-    gpio_set_function(PIN_UART1_TX, GPIO_FUNC_UART);
-    gpio_set_function(PIN_UART1_RX, GPIO_FUNC_UART);
-    uart_set_hw_flow(UART1_DEVICE, false, false);
-    uart_set_format(UART1_DEVICE, DATA_BITS, STOP_BITS, PARITY);
-#endif
-
-    // Set up the TFT display
-    spi_init(SPI_DEVICE, DISPLAY_SPI_SPEED);
-    gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
-    gpio_init(PIN_CS);
-    gpio_set_dir(PIN_CS, GPIO_OUT);
-    gpio_put(PIN_CS, 1);
-    gpio_init(PIN_DC);
-    gpio_set_dir(PIN_DC, GPIO_OUT);
-    gpio_init(PIN_RST);
-    gpio_set_dir(PIN_RST, GPIO_OUT);
-
-// Enable display. Can also just tie the display enable line to 3v3.
-#if defined(PIN_BL)
-    gpio_init(PIN_BL);
-    gpio_set_dir(PIN_BL, GPIO_OUT);
-    gpio_put(PIN_BL, 0); // backlight off until display initialized
-#endif
+    TimeMgr::InitializeSingleton(TIME_ZONE); // Needed for logging timestamps
+    LogInfo("Starting GPS TFT application...");
 
 #if defined(SEEED_XIAO_RP2040)
     // Clear LED(s) on XIAO (default on)
@@ -190,35 +158,44 @@ int main()
     spLED->SetIgnore({led_red, led_magenta});
 #endif
 
-// Create the GPS object
-#if defined(UART1_DEVICE)
-    GPS::Shared spGPS = std::make_shared<GPS>(UART0_DEVICE, UART1_DEVICE);
-#else
-    GPS::Shared spGPS = std::make_shared<GPS>(UART0_DEVICE);
-#endif
+    LogInfo("Creating GPS object...");
 
+    // Create the GPS object
+    GPS_UART::Shared spGPS = std::make_shared<GPS_UART>();
+    spGPS->SetInputUART(UART0_DEVICE, PIN_UART0_TX, PIN_UART0_RX, DATA_BITS, STOP_BITS, PARITY, UART_BAUD_RATE);
+#if defined(UART1_DEVICE)
+    spGPS->SetOutputUART(UART1_DEVICE, PIN_UART1_TX, PIN_UART1_RX, DATA_BITS, STOP_BITS, PARITY, UART_BAUD_RATE);
+#endif
+    // LogInfo("Initializing GPS object...");
+    // spGPS->Initialize();
+
+    LogInfo("Creating display object...");
     // Create the display. ILI9341 or ILI9488, rotate 270 degrees for landscape.
 #if defined(DISPLAY_ILI934X)
-    ILI_TFT::Shared spDisplay = std::make_shared<ILI934X>(SPI_DEVICE, PIN_CS, PIN_DC, PIN_RST, DISPLAY_ROTATION);
+    ILI934X::Shared spDisplay =
+        std::make_shared<ILI934X>(SPI_DEVICE, PIN_MISO, PIN_MOSI, PIN_SCK, PIN_CS, PIN_DC, PIN_RST, PIN_BL, DISPLAY_ROTATION);
 #elif defined(DISPLAY_ILI948X)
-    ILI_TFT::Shared spDisplay = std::make_shared<ILI948X>(SPI_DEVICE, PIN_CS, PIN_DC, PIN_RST, DISPLAY_ROTATION);
+    ILI948X::Shared spDisplay =
+        std::make_shared<ILI948X>(SPI_DEVICE, PIN_MISO, PIN_MOSI, PIN_SCK, PIN_CS, PIN_DC, PIN_RST, PIN_BL, DISPLAY_ROTATION);
 #elif defined(DISPLAY_ST7796)
-    ILI_TFT::Shared spDisplay = std::make_shared<ST7796>(SPI_DEVICE, PIN_CS, PIN_DC, PIN_RST, DISPLAY_ROTATION);
+    ST7796::Shared spDisplay =
+        std::make_shared<ST7796>(SPI_DEVICE, PIN_MISO, PIN_MOSI, PIN_SCK, PIN_CS, PIN_DC, PIN_RST, PIN_BL, DISPLAY_ROTATION);
 #else
 #error Unsupported display specified
 #endif
 
+    LogInfo("Reset display object...");
     spDisplay->Reset();
+    LogInfo("Initializing display object...");
     spDisplay->Initialize();
+    LogInfo("Clearing display...");
     spDisplay->Clear(COLOUR_BLACK);
-    gpio_put(PIN_BL, 1);
 
 #if !defined(NDEBUG)
+    LogInfo("Showing splash demo...");
     SplashDemo(spDisplay);
     spDisplay->Clear(COLOUR_BLACK);
 #endif
-
-    TimeMgr::InitializeSingleton(TIME_ZONE);
 
     // Create the GPS_TFT display object
     GPS_TFT::Shared spDevice = std::make_shared<GPS_TFT>(spDisplay, spGPS, spLED);
@@ -240,77 +217,76 @@ int main()
 void SplashDemo(ILI_TFT::Shared spDisplay)
 {
     // Palette demo splash: show all 16 named RGB565 colors with labels
+    struct NamedColour
     {
-        struct NamedColour
+        const char* name;
+        const char* hex;
+        uint16_t value;
+    };
+
+    static const NamedColour colours[16] = {
+        {"BLACK",   "0x0000", COLOUR_BLACK  },
+        {"MAROON",  "0x8000", COLOUR_MAROON },
+        {"GREEN",   "0x0400", COLOUR_GREEN  },
+        {"OLIVE",   "0x8400", COLOUR_OLIVE  },
+        {"NAVY",    "0x0010", COLOUR_NAVY   },
+        {"PURPLE",  "0x8010", COLOUR_PURPLE },
+        {"TEAL",    "0x0410", COLOUR_TEAL   },
+        {"SILVER",  "0xC618", COLOUR_SILVER },
+        {"GRAY",    "0x8410", COLOUR_GRAY   },
+        {"RED",     "0xF800", COLOUR_RED    },
+        {"LIME",    "0x07E0", COLOUR_LIME   },
+        {"YELLOW",  "0xFFE0", COLOUR_YELLOW },
+        {"BLUE",    "0x001F", COLOUR_BLUE   },
+        {"FUCHSIA", "0xF81F", COLOUR_FUCHSIA},
+        {"AQUA",    "0x07FF", COLOUR_AQUA   },
+        {"WHITE",   "0xFFFF", COLOUR_WHITE  },
+    };
+
+    auto text_colour_for_bg = [](uint16_t c) -> uint16_t {
+        uint8_t r5 = (c >> 11) & 0x1f;
+        uint8_t g6 = (c >> 5) & 0x3f;
+        uint8_t b5 = c & 0x1f;
+        uint16_t r = (r5 * 255) / 31;
+        uint16_t g = (g6 * 255) / 63;
+        uint16_t b = (b5 * 255) / 31;
+        uint16_t luma = static_cast<uint16_t>((299u * r + 587u * g + 114u * b) / 1000u);
+        return (luma > 140) ? COLOUR_BLACK : COLOUR_WHITE;
+    };
+
+    const int cols = 4;
+    const int rows = 4;
+    int dispW = spDisplay->Width();
+    int dispH = spDisplay->Height();
+    int cellW = dispW / cols;
+    int cellH = dispH / rows;
+
+    auto nFontSize = spDisplay->get_recommended_font_size();
+    // Initialize display
+    spDisplay->SetFont(get_recommended_font(nFontSize));
+
+    for (auto nQuadrant : spDisplay->GetQuadrants())
+    {
+        spDisplay->SetQuadrant(nQuadrant);
+        spDisplay->Fill(COLOUR_BLACK);
+        for (int i = 0; i < 16; ++i)
         {
-            const char* name;
-            const char* hex;
-            uint16_t value;
-        };
+            int col = i % cols;
+            int row = i / cols;
+            int x = col * cellW;
+            int y = row * cellH;
+            int w = (col == cols - 1) ? (dispW - x) : cellW;
+            int h = (row == rows - 1) ? (dispH - y) : cellH;
 
-        static const NamedColour colours[16] = {
-            {"BLACK",   "0x0000", COLOUR_BLACK  },
-            {"MAROON",  "0x8000", COLOUR_MAROON },
-            {"GREEN",   "0x0400", COLOUR_GREEN  },
-            {"OLIVE",   "0x8400", COLOUR_OLIVE  },
-            {"NAVY",    "0x0010", COLOUR_NAVY   },
-            {"PURPLE",  "0x8010", COLOUR_PURPLE },
-            {"TEAL",    "0x0410", COLOUR_TEAL   },
-            {"SILVER",  "0xC618", COLOUR_SILVER },
-            {"GRAY",    "0x8410", COLOUR_GRAY   },
-            {"RED",     "0xF800", COLOUR_RED    },
-            {"LIME",    "0x07E0", COLOUR_LIME   },
-            {"YELLOW",  "0xFFE0", COLOUR_YELLOW },
-            {"BLUE",    "0x001F", COLOUR_BLUE   },
-            {"FUCHSIA", "0xF81F", COLOUR_FUCHSIA},
-            {"AQUA",    "0x07FF", COLOUR_AQUA   },
-            {"WHITE",   "0xFFFF", COLOUR_WHITE  },
-        };
-
-        auto text_colour_for_bg = [](uint16_t c) -> uint16_t {
-            uint8_t r5 = (c >> 11) & 0x1f;
-            uint8_t g6 = (c >> 5) & 0x3f;
-            uint8_t b5 = c & 0x1f;
-            uint16_t r = (r5 * 255) / 31;
-            uint16_t g = (g6 * 255) / 63;
-            uint16_t b = (b5 * 255) / 31;
-            uint16_t luma = static_cast<uint16_t>((299u * r + 587u * g + 114u * b) / 1000u);
-            return (luma > 140) ? COLOUR_BLACK : COLOUR_WHITE;
-        };
-
-        const int cols = 4;
-        const int rows = 4;
-        int dispW = spDisplay->Width();
-        int dispH = spDisplay->Height();
-        int cellW = dispW / cols;
-        int cellH = dispH / rows;
-
-        auto nFontSize = spDisplay->get_recommended_font_size();
-        // Initialize display
-        spDisplay->SetFont(get_recommended_font(nFontSize));
-
-        for (auto nQuadrant : spDisplay->GetQuadrants())
-        {
-            spDisplay->SetQuadrant(nQuadrant);
-            spDisplay->Fill(COLOUR_BLACK);
-            for (int i = 0; i < 16; ++i)
-            {
-                int col = i % cols;
-                int row = i / cols;
-                int x = col * cellW;
-                int y = row * cellH;
-                int w = (col == cols - 1) ? (dispW - x) : cellW;
-                int h = (row == rows - 1) ? (dispH - y) : cellH;
-
-                spDisplay->FillRect(x, y, w, h, colours[i].value);
-                uint16_t textColour = text_colour_for_bg(colours[i].value);
-                spDisplay->Text(colours[i].name, x + 3, y + 3, textColour);
-                spDisplay->Text(colours[i].hex, x + 3, y + spDisplay->GetFont()->height + 3, textColour);
-            }
-
-            spDisplay->Show();
+            spDisplay->FillRect(x, y, w, h, colours[i].value);
+            uint16_t textColour = text_colour_for_bg(colours[i].value);
+            spDisplay->Text(colours[i].name, x + 3, y + 3, textColour);
+            spDisplay->Text(colours[i].hex, x + 3, y + spDisplay->GetFont()->height + 3, textColour);
         }
-        sleep_ms(2000);
+
+        spDisplay->Show();
     }
+    sleep_ms(2000);
+    spDisplay->Clear(COLOUR_BLACK);
 }
 #endif
