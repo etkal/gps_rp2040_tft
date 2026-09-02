@@ -5,12 +5,12 @@
  *
  */
 
+#pragma once
+
 #include <stdio.h>
-#include <queue>
 #include <memory>
 
 #include "pico/stdlib.h"
-#include "pico/critical_section.h"
 #include "pico/util/queue.h"
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
