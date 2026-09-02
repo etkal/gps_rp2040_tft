@@ -84,11 +84,7 @@ void GPS_UART::SetOutputUART(uart_inst_t* pUart,
 
 void GPS_UART::Initialize()
 {
-    LogInfo("Initializing GPS base class...");
-
     GPS::Initialize(); // Call base class Initialize to set up alarm pool and timer
-
-    LogInfo("Initializing GPS_UART...");
 
     // Register the callback to handle sentences received from the GPS device
     sm_pGPS = this;
