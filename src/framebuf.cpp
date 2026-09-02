@@ -91,15 +91,27 @@ void Framebuf::Initialize(uint16_t nWidth, uint16_t nHeight, ePixelFormat eForma
     case MVLSB:
     case MHLSB:
     case MHMSB:
+        if (nullptr != m_pBuf)
+        {
+            delete[] (uint8_t*)m_pBuf;
+        }
         m_pBuf = new uint8_t[m_nWidth * m_nHeight / 8];
         m_nStride = (m_nStride + 7) & ~7;
         m_nPixelSize = 1;
         break;
     case RGB565:
+        if (nullptr != m_pBuf)
+        {
+            delete[] (uint16_t*)m_pBuf;
+        }
         m_pBuf = new uint16_t[m_nWidth * m_nHeight];
         m_nPixelSize = 2;
         break;
     case RGB666:
+        if (nullptr != m_pBuf)
+        {
+            delete[] (pixel666*)m_pBuf;
+        }
         m_pBuf = new pixel666[m_nWidth * m_nHeight];
         m_nPixelSize = 3;
         break;

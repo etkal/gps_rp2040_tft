@@ -66,7 +66,7 @@ GPS_TFT::GPS_TFT(ILI_TFT::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED
       m_spLED(spLED),
       m_nLastTimeSyncAttemptSec(std::numeric_limits<uint64_t>::max())
 {
-    critical_section_init(&m_GpsDataCallbackCS);
+    queue_init(&m_qGPSData, sizeof(GPSData*), 10); // Initialize the queue with a capacity of 10
 }
 
 GPS_TFT::~GPS_TFT()
@@ -75,7 +75,6 @@ GPS_TFT::~GPS_TFT()
 
 void GPS_TFT::Initialize()
 {
-    m_spDisplay->Reset();
     m_spDisplay->Initialize();
     for (auto nQuadrant : m_spDisplay->GetQuadrants())
     {
@@ -92,10 +91,16 @@ void GPS_TFT::Initialize()
     showWaitingForGPS();
 
     m_spGPS->SetGpsDataCallback(this, gpsDataCB);
+
+    m_spIdleTimer = std::make_shared<AlarmTimer>([this]() {
+        LogInfo("GPS_TFT - No GPS data received showing waiting message");
+        showWaitingForGPS();
+    });
 }
 
 void GPS_TFT::Run()
 {
+#if defined(USE_MULTICORE)
     // Start GPS processing loop on processor core 1
     static auto sm_spGPS = m_spGPS; // Capture shared pointer for use in lambda
     multicore_launch_core1([]() {
@@ -105,37 +110,33 @@ void GPS_TFT::Run()
         spGPS->Initialize();
         spGPS->Run();
     });
-
-    m_spIdleTimer = std::make_shared<AlarmTimer>([this]() {
-        LogInfo("GPS_TFT - No GPS data received showing waiting message");
-        showWaitingForGPS();
-    });
+#else
+    // If we are not using multicore, we can run the GPS processing from the display loop
+    LogInfo("Starting GPS processing on core 0");
+    m_spGPS->Initialize();
+#endif // USE_MULTICORE
 
     // Main loop for updating the display
     while (true)
     {
-        busy_wait_ms(10); // Sleep for 10ms to avoid busy waiting
-
+#if !defined(USE_MULTICORE)
+        m_spGPS->RunOnce();
+#endif
         bool bHasQueuedGpsData = false;
         GPSData::Shared spGPSData;
         // Check if we have new GPS data to display, just take the most recent one and discard the rest to avoid UI lag
-        critical_section_enter_blocking(&m_GpsDataCallbackCS);
-        if (!m_qGPSData.empty())
+        while (!queue_is_empty(&m_qGPSData))
         {
+            GPSData* pGPSData = nullptr;
             bHasQueuedGpsData = true;
-            while (!m_qGPSData.empty())
-            {
-                spGPSData = m_qGPSData.front();
-                m_qGPSData.pop();
-            }
+            queue_try_remove(&m_qGPSData, &pGPSData);
+            spGPSData = GPSData::Shared(pGPSData);
         }
-        critical_section_exit(&m_GpsDataCallbackCS);
 
         if (bHasQueuedGpsData && spGPSData)
         {
             LogInfo("GPS_TFT - Updating UI");
-            updateUI(spGPSData);
-            spGPSData.reset();           // Free the data
+            updateUI(std::move(spGPSData));
             m_spIdleTimer->Start(10000); // Reset the idle timer to 10 seconds
         }
     }
@@ -156,10 +157,10 @@ void GPS_TFT::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
     }
 
     // Make a deep copy of the GPSData to avoid issues with shared ownership and data races
-    critical_section_enter_blocking(&pThis->m_GpsDataCallbackCS);
-    GPSData::Shared spGPSDataCopy = std::make_shared<GPSData>(*spGPSData);
-    pThis->m_qGPSData.push(spGPSDataCopy);
-    critical_section_exit(&pThis->m_GpsDataCallbackCS);
+    auto upGPSDataCopy = std::make_unique<GPSData>(*spGPSData);
+
+    GPSData* pGPSDataCopy = upGPSDataCopy.release(); // owned by the queue now
+    queue_try_add(&pThis->m_qGPSData, &pGPSDataCopy);
 }
 
 void GPS_TFT::showWaitingForGPS()
@@ -279,12 +280,12 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
 #endif
 
         // Draw clock
-        if (TimeMgr::IsWallClockValid())
+        if (!spGPSData->strGPSTime.empty())
         {
             uint lineHeight = getCharHeight() + 1;
             uint radius = m_spDisplay->ShorterSide() / 8;
             uint xPos = m_spDisplay->Landscape() ? nWidth / 2 : X_PAD + getCharWidth() * 3;
-            drawClock(xPos, lineHeight * PAD_CHARS_Y, radius, TimeMgr::FormatCurrentTimeHMS());
+            drawClock(xPos, lineHeight * PAD_CHARS_Y, radius, spGPSData->strGPSTime);
         }
 
         // Draw bar graph

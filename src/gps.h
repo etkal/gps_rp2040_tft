@@ -98,6 +98,7 @@ public:
     // Derived classes can perform their own initialization and also invoke the base class function
     virtual void Initialize();
     void Run();
+    void RunOnce();
     void Stop();
 
     void SetSentenceCallback(void* pCtx, sentenceCallback pCB);

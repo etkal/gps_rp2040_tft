@@ -215,7 +215,7 @@ void GPS_UART::on_uart_rx()
                 // Should never happen if the queue is sized appropriately. Using the queue_get_max_level()
                 // function (if so compiled) shows the queue never exceeded 1 in testing, so a queue size
                 // of 16 is more than sufficient.
-                panic("Queue full");
+                printf("Queue full\n");
             }
             sm_iNext = 0;
         }

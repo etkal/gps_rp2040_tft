@@ -55,8 +55,12 @@ static std::map<std::string, eSentenceType> g_SentenceTypeMap = {
 
 namespace
 {
-    constexpr uint32_t gpsDataPublishDelayMs = 0;
-}
+#if defined(USE_MULTICORE)
+    constexpr uint32_t gpsDataPublishDelayMs = 0; // When using multicore, we can publish GPS data immediately without delay
+#else
+    constexpr uint32_t gpsDataPublishDelayMs = 400;
+#endif
+} // namespace
 
 GPS::GPS()
 {
@@ -139,21 +143,26 @@ void GPS::Initialize()
 // Main loop for processing GPS sentences. This function will run until Stop() is called.
 void GPS::Run()
 {
-    std::string strSentence;
     while (!m_bExit)
     {
-        // Read sentence from GPS device
-        if (getSentence(strSentence))
-        {
-            m_spIdleTimer->Start(5000);   // Start the idle timer to 5 seconds
-            processSentence(strSentence); // Process the sentence and update GPS data
-        }
+        RunOnce();
+    }
+}
 
-        if (m_bSendGpsData)
-        {
-            m_bSendGpsData = false;
-            m_spSendDataTimer->Start(gpsDataPublishDelayMs);
-        }
+void GPS::RunOnce()
+{
+    std::string strSentence;
+    // Read sentence from GPS device
+    if (getSentence(strSentence))
+    {
+        m_spIdleTimer->Start(5000);   // Start the idle timer to 5 seconds
+        processSentence(strSentence); // Process the sentence and update GPS data
+    }
+
+    if (m_bSendGpsData)
+    {
+        m_bSendGpsData = false;
+        m_spSendDataTimer->Start(gpsDataPublishDelayMs);
     }
 }
 
