@@ -84,13 +84,9 @@ void GPS_UART::SetOutputUART(uart_inst_t* pUart,
 
 void GPS_UART::Initialize()
 {
-    LogInfo("Initializing GPS base class...");
-
     GPS::Initialize(); // Call base class Initialize to set up alarm pool and timer
 
-    LogInfo("Initializing GPS_UART...");
-
-    // Register the callback to handle sentences received from the GPS device
+    // Register the callback to handle validated sentences processed by the base class
     sm_pGPS = this;
     GPS::SetSentenceCallback(this, sentenceCB);
 
@@ -215,7 +211,7 @@ void GPS_UART::on_uart_rx()
                 // Should never happen if the queue is sized appropriately. Using the queue_get_max_level()
                 // function (if so compiled) shows the queue never exceeded 1 in testing, so a queue size
                 // of 16 is more than sufficient.
-                panic("Queue full");
+                printf("Queue full\n");
             }
             sm_iNext = 0;
         }

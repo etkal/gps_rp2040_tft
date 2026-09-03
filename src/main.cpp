@@ -166,8 +166,6 @@ int main()
 #if defined(UART1_DEVICE)
     spGPS->SetOutputUART(UART1_DEVICE, PIN_UART1_TX, PIN_UART1_RX, DATA_BITS, STOP_BITS, PARITY, UART_BAUD_RATE);
 #endif
-    // LogInfo("Initializing GPS object...");
-    // spGPS->Initialize();
 
     LogInfo("Creating display object...");
     // Create the display. ILI9341 or ILI9488, rotate 270 degrees for landscape.
@@ -184,8 +182,6 @@ int main()
 #error Unsupported display specified
 #endif
 
-    LogInfo("Reset display object...");
-    spDisplay->Reset();
     LogInfo("Initializing display object...");
     spDisplay->Initialize();
     LogInfo("Clearing display...");

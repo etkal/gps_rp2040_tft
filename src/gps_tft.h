@@ -5,12 +5,13 @@
  *
  */
 
+#pragma once
+
 #include <stdio.h>
-#include <queue>
 #include <memory>
 
 #include "pico/stdlib.h"
-#include "pico/critical_section.h"
+#include "pico/util/queue.h"
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
 
@@ -90,8 +91,7 @@ private:
     GPS::Shared m_spGPS;
     LED::Shared m_spLED;
     GPSData::Shared m_spGPSData;            // Current data being used for display
-    std::queue<GPSData::Shared> m_qGPSData; // Queue of GPS data to be processed by the display loop
     uint64_t m_nLastTimeSyncAttemptSec;
-    critical_section m_GpsDataCallbackCS; // Protects access to GPS data queue
+    queue_t m_qGPSData; // Queue of GPS data to be processed by the display loop
     AlarmTimer::Shared m_spIdleTimer;     // Timer to detect lack of GPS data
 };

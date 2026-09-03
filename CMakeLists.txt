@@ -22,6 +22,13 @@ set(PICO_BOARD pico_w)
 #set(PICO_BOARD waveshare_rp2040_zero)
 #set(PICO_BOARD seeed_xiao_rp2040)
 
+# Use this to enable multicore support for the RP2040. On some hardware this can improve performance.
+add_compile_definitions(USE_MULTICORE)
+
+# GPS data callback delay (in milliseconds). On some hardware this is necessary in order to
+# keep the display update from interfering with the received UART data (even if on another core).
+add_compile_definitions(GPS_SEND_DATA_DELAY_MS=400)
+
 # TFT display type - enable one of the following
 #
 #add_compile_definitions(DISPLAY_ILI934X)
@@ -56,7 +63,7 @@ add_compile_definitions(GMT_OFFSET=-4.0)
 # Adafruit breakout GPS modules support sending antenna status requests to the GPS device.
 # This is not needed for other modules, but it is mostly harmless to enable it (can cause
 # issues with some GPS modules). If you have issues, comment out the following line.
-#add_compile_definitions(SEND_ANTENNA_STATUS_REQUESTS) # Enable sending antenna status requests to the GPS device
+add_compile_definitions(SEND_ANTENNA_STATUS_REQUESTS) # Enable sending antenna status requests to the GPS device
 
 # Set pico platform definitions for conditional compilation
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)
