@@ -22,7 +22,12 @@ set(PICO_BOARD pico_w)
 #set(PICO_BOARD waveshare_rp2040_zero)
 #set(PICO_BOARD seeed_xiao_rp2040)
 
-add_compile_definitions(USE_MULTICORE) # Enable multicore support for the RP2040
+# Use this to enable multicore support for the RP2040. On some hardware this can improve performance.
+add_compile_definitions(USE_MULTICORE)
+
+# GPS data callback delay (in milliseconds). On some hardware this is necessary in order to
+# keep the display update from interfering with the received UART data (even if on another core).
+add_compile_definitions(GPS_SEND_DATA_DELAY_MS=400)
 
 # TFT display type - enable one of the following
 #

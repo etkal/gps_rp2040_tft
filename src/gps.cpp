@@ -55,11 +55,7 @@ static std::map<std::string, eSentenceType> g_SentenceTypeMap = {
 
 namespace
 {
-#if defined(USE_MULTICORE)
-    constexpr uint32_t gpsDataPublishDelayMs = 0; // When using multicore, we can publish GPS data immediately without delay
-#else
-    constexpr uint32_t gpsDataPublishDelayMs = 400;
-#endif
+    constexpr uint32_t gpsSendDataDelayMs = GPS_SEND_DATA_DELAY_MS;
 } // namespace
 
 GPS::GPS()
@@ -162,7 +158,7 @@ void GPS::RunOnce()
     if (m_bSendGpsData)
     {
         m_bSendGpsData = false;
-        m_spSendDataTimer->Start(gpsDataPublishDelayMs);
+        m_spSendDataTimer->Start(gpsSendDataDelayMs);
     }
 }
 

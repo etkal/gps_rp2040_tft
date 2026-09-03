@@ -86,7 +86,7 @@ void GPS_UART::Initialize()
 {
     GPS::Initialize(); // Call base class Initialize to set up alarm pool and timer
 
-    // Register the callback to handle sentences received from the GPS device
+    // Register the callback to handle validated sentences processed by the base class
     sm_pGPS = this;
     GPS::SetSentenceCallback(this, sentenceCB);
 
