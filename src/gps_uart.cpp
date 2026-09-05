@@ -29,12 +29,12 @@
 #include <iomanip>
 #include <cmath>
 
+#include "hardware/dma.h"
+#include "hardware/irq.h"
 #include "timemgr.h"
 
 // Static members for RX
 GPS_UART* GPS_UART::sm_pGPS = nullptr;
-char GPS_UART::sm_szBuffer[GPS_BUFSIZE];
-size_t GPS_UART::sm_iNext = 0;
 
 GPS_UART::GPS_UART()
     : GPS::GPS()
@@ -43,6 +43,17 @@ GPS_UART::GPS_UART()
 
 GPS_UART::~GPS_UART()
 {
+    // Tear down the DMA channel if it was set up
+    if (m_dmaChanRx >= 0)
+    {
+        dma_channel_abort(m_dmaChanRx);
+        dma_channel_unclaim(m_dmaChanRx);
+        m_dmaChanRx = -1;
+    }
+    if (sm_pGPS == this)
+    {
+        sm_pGPS = nullptr;
+    }
     queue_free(&m_qSentences); // Free the queue resources
 }
 
@@ -113,39 +124,45 @@ void GPS_UART::Initialize()
         uart_set_format(m_pUartOut, m_data_bits_out, m_stop_bits_out, m_parity_out);
     }
 
-    uart_set_fifo_enabled(m_pUartIn, false); // Disable FIFO to get immediate RX interrupts
-    int uartIRQ = (uart0 == sm_pGPS->GetInputUART() ? UART0_IRQ : UART1_IRQ);
-    // Set up and enable the interrupt handler
-    irq_set_exclusive_handler(uartIRQ, on_uart_rx);
-    irq_set_enabled(uartIRQ, true);
-    // Now enable the UART to send interrupts - RX only
-    uart_set_irqs_enabled(m_pUartIn, true, false);
+    // Set up a circular DMA buffer for UART RX. A single DMA channel continuously streams bytes from
+    // the UART data register into m_szDmaBuf in ring mode, wrapping automatically at the end. There is
+    // no interrupt: the main loop chases the hardware write pointer (derived from the channel's
+    // remaining transfer_count) and consumes bytes at its leisure. This is race-free because the DMA
+    // only ever appends and we only ever read up to the last-known write position.
+    uart_set_fifo_enabled(m_pUartIn, true); // FIFO must be enabled for UART DMA operation
+    uart_set_irqs_enabled(m_pUartIn, false, false);
+
+    m_dmaChanRx = dma_claim_unused_channel(true);
+    m_iDmaReadPos = 0;
+
+    dma_channel_config cfgRx = dma_channel_get_default_config(m_dmaChanRx);
+    channel_config_set_transfer_data_size(&cfgRx, DMA_SIZE_8);
+    channel_config_set_read_increment(&cfgRx, false);
+    channel_config_set_write_increment(&cfgRx, true);
+    channel_config_set_dreq(&cfgRx, uart_get_dreq_num(m_pUartIn, false));  // pace by UART RX
+    channel_config_set_ring(&cfgRx, true, __builtin_ctz(GPS_DMA_BUFSIZE)); // wrap write address at buffer size
+    dma_channel_configure(m_dmaChanRx,
+                          &cfgRx,
+                          m_szDmaBuf,                  // circular destination buffer
+                          &uart_get_hw(m_pUartIn)->dr, // UART data register
+                          0xFFFFFFFF,                  // effectively never stop; ring mode wraps the address
+                          true);                       // start immediately
 
 #if defined(SEND_ANTENNA_STATUS_REQUESTS)
     // Set up a timer to send antenna status commands to the GPS device every 30 seconds, starting after 2 seconds.
-    // We only use this to set a flag in the GPS_UART class, which is then used as sentences are received to attempt
-    // to send the antenna status commands. This is done to avoid sending the commands while the GPS device is busy
-    // sending sentences, which can cause the GPS device behave badly.
     m_spSendAntennaStatusTimer = std::make_shared<DelayedRepeatingTimer>(
         2000,
         30000,
         [this]() {
-            m_bSendAntennaStatus = true;
-        },
-        m_pAlarmPool);
-    m_spSendAntennaStatusTimer->Start();
-    // Alarm timer to delay the sending of those sences.
-    m_spSendAntennaStatusAlarm = std::make_shared<AlarmTimer>(
-        [this]() {
             sendExternalAntennaStatusRequest();
         },
         m_pAlarmPool);
+    m_spSendAntennaStatusTimer->Start();
 #endif
 
     LogInfo("GPS_UART initialization complete.");
 }
 
-#if defined(SEND_ANTENNA_STATUS_REQUESTS)
 void GPS_UART::sendExternalAntennaStatusRequest()
 {
     LogInfo("Sending antenna status commands to GPS device...");
@@ -155,7 +172,6 @@ void GPS_UART::sendExternalAntennaStatusRequest()
     uart_puts(GetInputUART(), strPGCMD.c_str());
     uart_puts(GetInputUART(), strCDCMD.c_str());
 }
-#endif
 
 // Use this callback from the base class in order to echo sentences received from the
 // GPS device to the output UART (if set).
@@ -163,57 +179,37 @@ void GPS_UART::sentenceCB(void* pCtx, std::string strSentence)
 {
     GPS_UART* pThis = static_cast<GPS_UART*>(pCtx);
 
-#if defined(SEND_ANTENNA_STATUS_REQUESTS)
-    static uint64_t nLastSentenceTime = 0;
-    uint64_t nNow = time_us_64();
-    if (pThis->m_bSendAntennaStatus && nNow - nLastSentenceTime > 250000)
-    {
-        // We've detected a gap, assume this is the first sentence in a group, so delay the sending
-        // of the antenna status commands for 500 ms to attempt to send it after this group.
-        LogInfo("GPS_UART - Detected sentence gap, delaying antenna status commands");
-        pThis->m_spSendAntennaStatusAlarm->Start(500);
-        pThis->m_bSendAntennaStatus = false;
-    }
-    nLastSentenceTime = nNow;
-#endif
-
     if (nullptr != pThis->m_pUartOut)
     {
         uart_puts(pThis->m_pUartOut, strSentence.c_str()); // Echo to the listening port
     }
 }
 
-// RX interrupt handler. This function is called when data is received on the input UART. It reads characters from the UART and assembles
-// them into sentences, which are then added to a queue for processing. The SDK queue_t structure is used for thread-safe access to the
-// queue from both the interrupt handler and the main processing loop.
-void GPS_UART::on_uart_rx()
+// Feed received bytes into the sentence assembly buffer. Completed sentences are queued for the main loop.
+void GPS_UART::processDmaBytes(const uint8_t* pBuf, size_t nLen)
 {
-    uart_inst_t* pUart = sm_pGPS->GetInputUART();
-    while (uart_is_readable(pUart))
+    for (size_t i = 0; i < nLen; ++i)
     {
-        char ch = uart_getc(pUart);
-        if (ch == '$' && sm_iNext != 0)
+        char ch = (char)pBuf[i];
+        if (ch == '$' && m_iNext != 0)
         {
-            // If we see a new sentence start and we have data in the buffer, discard the old data
-            sm_iNext = 0;
+            // New sentence start with data in the buffer: discard the old partial data
+            m_iNext = 0;
         }
-        sm_szBuffer[sm_iNext] = ch;
-        sm_iNext += 1;
-        if (sm_iNext >= GPS_BUFSIZE)
+        m_szBuf[m_iNext++] = ch;
+        if (m_iNext >= GPS_BUFSIZE)
         {
-            sm_iNext = 0; // wrap around, will sync up eventually
+            m_iNext = 0; // overflow, will sync up on next sentence
         }
         if (ch == '\n')
         {
-            sm_szBuffer[sm_iNext] = '\0';
-            if (!queue_try_add(&sm_pGPS->m_qSentences, sm_szBuffer))
+            m_szBuf[m_iNext] = '\0';
+            if (!queue_try_add(&m_qSentences, m_szBuf))
             {
-                // Should never happen if the queue is sized appropriately. Using the queue_get_max_level()
-                // function (if so compiled) shows the queue never exceeded 1 in testing, so a queue size
-                // of 16 is more than sufficient.
+                // Should never happen if the queue is sized appropriately
                 printf("Queue full\n");
             }
-            sm_iNext = 0;
+            m_iNext = 0;
         }
     }
 }
@@ -221,6 +217,33 @@ void GPS_UART::on_uart_rx()
 // Get a sentence from the queue. This function will return false if no sentence is available.
 bool GPS_UART::getSentence(std::string& strSentence)
 {
+    // Drain any bytes the DMA has written to the circular buffer since our last pass. The current write
+    // position is the channel's write address register relative to the buffer base; in ring mode this
+    // always stays within [0, GPS_DMA_BUFSIZE). Read a snapshot before consuming.
+    uintptr_t nWriteAddr = dma_channel_hw_addr(m_dmaChanRx)->write_addr;
+    uintptr_t nBase = (uintptr_t)m_szDmaBuf;
+    size_t nWritePos = (size_t)(nWriteAddr - nBase);
+    if (nWritePos >= GPS_DMA_BUFSIZE)
+    {
+        nWritePos = 0; // defensive clamp (should not happen in ring mode)
+    }
+
+    if (nWritePos != m_iDmaReadPos)
+    {
+        if (nWritePos > m_iDmaReadPos)
+        {
+            // Contiguous region: read [readPos, writePos)
+            processDmaBytes((const uint8_t*)m_szDmaBuf + m_iDmaReadPos, nWritePos - m_iDmaReadPos);
+        }
+        else
+        {
+            // Wrapped: read [readPos, end) then [0, writePos)
+            processDmaBytes((const uint8_t*)m_szDmaBuf + m_iDmaReadPos, GPS_DMA_BUFSIZE - m_iDmaReadPos);
+            processDmaBytes((const uint8_t*)m_szDmaBuf, nWritePos);
+        }
+        m_iDmaReadPos = nWritePos;
+    }
+
     bool bFound = false;
 
     // Check if there are any sentences in the queue. If so, remove one and return it.
