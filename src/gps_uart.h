@@ -11,14 +11,16 @@
 
 #include "gps.h"
 
+#include "hardware/dma.h"
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
 #include "pico/util/queue.h"
 
 #include "timemgr.h"
 
-auto constexpr GPS_BUFSIZE = 96;    // Max NMEA-0183 sentence length is actually 82 characters
-auto constexpr GPS_QUEUE_SIZE = 16; // Number of sentences to queue
+auto constexpr GPS_BUFSIZE = 96;      // Max NMEA-0183 sentence length is actually 82 characters
+auto constexpr GPS_QUEUE_SIZE = 16;   // Number of sentences to queue
+auto constexpr GPS_DMA_BUFSIZE = 256; // Circular DMA buffer size; must be a power of two for ring mode
 
 class GPS_UART : public GPS
 {
@@ -65,15 +67,20 @@ private:
 
 #if defined(SEND_ANTENNA_STATUS_REQUESTS)
     DelayedRepeatingTimer::Shared m_spSendAntennaStatusTimer;
-    AlarmTimer::Shared m_spSendAntennaStatusAlarm;
-    bool m_bSendAntennaStatus {false};
 #endif
 
-    // RX management
-    static GPS_UART* sm_pGPS;
-    static char sm_szBuffer[GPS_BUFSIZE];
-    static size_t sm_iNext;
-    static void on_uart_rx();
+    // RX management (circular DMA buffer)
+    static GPS_UART* sm_pGPS; // retained for potential static callbacks
+    void processDmaBytes(const uint8_t* pBuf, size_t nLen);
+
+    // DMA ring state. A single channel streams UART RX bytes into m_szDmaBuf in ring mode; the
+    // main loop chases the hardware write pointer (derived from the channel's transfer_count).
+    int m_dmaChanRx {-1};      // DMA channel: UART RX -> circular buffer
+    size_t m_iDmaReadPos {0};  // our read offset into the circular buffer
+    char m_szBuf[GPS_BUFSIZE]; // current sentence assembly buffer
+    size_t m_iNext {0};        // write offset into m_szBuf
+    // DMA circular buffer for UART RX
+    char m_szDmaBuf[GPS_DMA_BUFSIZE] __attribute__((aligned(GPS_DMA_BUFSIZE))); // ring buffer, aligned to its size
 
     // Queue for received sentences
     queue_t m_qSentences;
