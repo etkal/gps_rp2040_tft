@@ -42,14 +42,21 @@ public:
 
 private:
     static void gpsDataCB(void* pCtx, GPSData::Shared spGPSData);
+    static void messageCB(void* pCtx, std::string strMessage);
 
-    void showWaitingForGPS();
-    void blinkLED();
-    void updateTime();
-    void getVsysVoltage();
-    void updateUI();
-    void drawSatGrid(uint xCenter, uint yCenter, uint radius, uint nRings = 3);
-    void drawBarGraph(uint x, uint y, uint width, uint height);
+    // Hand a GPSData::Shared across a pico queue_t via a heap-allocated shared_ptr wrapper,
+    // so the underlying object's lifetime is managed safely (and only) via reference counting.
+    static bool enqueueGPSData(queue_t& q, const GPSData::Shared& spData);
+    // Drain a queue of heap-allocated shared_ptr wrappers, keeping only the most recent GPSData.
+    static GPSData::Shared dequeueLatestGPSData(queue_t& q);
+
+    void showScreenMessage(std::string strMessage);
+    void blinkLED(bool bHasPosition, bool bExternalAntenna);
+    void updateTime(std::string strGPSTimeRaw, std::string strGPSDateRaw);
+    std::string getVsysVoltage();
+    void updateUI(GPSData::Shared spGPSData);
+    void drawSatGrid(const GPSData::Shared& spGPSData, uint xCenter, uint yCenter, uint radius, uint nRings = 3);
+    void drawBarGraph(const GPSData::Shared& spGPSData, uint x, uint y, uint width, uint height);
     void drawClock(uint x, uint y, uint radius, std::string strTime);
     void drawCircleSat(uint gridCenterX,
                        uint gridCenterY,
@@ -93,9 +100,9 @@ private:
     ILI_TFT::Shared m_spDisplay;
     GPS::Shared m_spGPS;
     LED::Shared m_spLED;
-    GPSData::Shared m_spGPSData;            // Current data being used for display
     uint64_t m_nLastTimeSyncAttemptSec;
-    queue_t m_qGPSData; // Queue of GPS data to be processed by the display loop
+    queue_t m_qIncomingGPSData; // Queue of GPS data from the source
+    queue_t m_qDisplayGPSData; // Queue of GPS data to be displayed
     AlarmTimer::Shared m_spIdleTimer;     // Timer to detect lack of GPS data
     bool m_bShowWaitingForGPS {false};
 };

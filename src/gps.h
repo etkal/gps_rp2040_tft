@@ -88,6 +88,7 @@ public:
 
 typedef void (*sentenceCallback)(void* pCtx, std::string strSentence);
 typedef void (*gpsDataCallback)(void* pCtx, GPSData::Shared spGPSData);
+typedef void (*messageCallback)(void* pCtx, std::string strMessage);
 
 class GPS
 {
@@ -105,6 +106,7 @@ public:
 
     void SetSentenceCallback(void* pCtx, sentenceCallback pCB);
     void SetGpsDataCallback(void* pCtx, gpsDataCallback pCB);
+    void SetMessageCallback(void* pCtx, messageCallback pCB);
 
 protected:
     alarm_pool_t* m_pAlarmPool {nullptr};
@@ -112,6 +114,11 @@ protected:
     // Derived classes must implement this to retrieve sentences safely, e.g. to handle IRQ enable/disable
     // or by using a critical section.
     virtual bool getSentence(std::string& strSentence) = 0;
+
+    messageCallback m_pMessageCallback {nullptr};
+    void* m_pMessageCtx {nullptr};
+    sentenceCallback m_pSentenceCallBack {nullptr};
+    void* m_pSentenceCtx {nullptr};
 
 private:
     bool processSentence(std::string strSentence);
@@ -131,8 +138,6 @@ private:
 
     AlarmTimer::Shared m_spSendDataTimer; // Delay after receiving a specific sentence before sending GPS data
     AlarmTimer::Shared m_spIdleTimer;     // Timer to detect lack of GPS data
-    sentenceCallback m_pSentenceCallBack {nullptr};
-    void* m_pSentenceCtx {nullptr};
     gpsDataCallback m_pGpsDataCallback {nullptr};
     void* m_pGpsDataCtx {nullptr};
 };

@@ -30,8 +30,7 @@ set(PICO_BOARD pico)
 add_compile_definitions(DISPLAY_ON_CORE_1)
 
 # GPS data callback delay (in milliseconds). On some hardware this is necessary in order to
-# keep the display update from interfering with the received UART data (even if on another core).
-# Note that after switching from UART IRQ to DMA, this does not seem to be needed.
+# keep the display update from interfering with the received data (even if on another core).
 add_compile_definitions(GPS_SEND_DATA_DELAY_MS=0)
 
 # TFT display type - enable one of the following
@@ -69,6 +68,9 @@ add_compile_definitions(GMT_OFFSET=-4.0)
 # This is not needed for other modules, but it is mostly harmless to enable it (can cause
 # issues with some GPS modules). If you have issues, comment out the following line.
 add_compile_definitions(SEND_ANTENNA_STATUS_REQUESTS) # Enable sending antenna status requests to the GPS device
+
+# Enable display of vsys voltage and power source. Note: incorrect on Pico 2 (non-W variant)
+#add_compile_definitions(DISPLAY_VSYS_VOLTAGE)
 
 # Set pico platform definitions for conditional compilation
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)
