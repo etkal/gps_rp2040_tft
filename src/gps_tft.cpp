@@ -69,7 +69,8 @@ GPS_TFT::GPS_TFT(ILI_TFT::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED
       m_spLED(spLED),
       m_nLastTimeSyncAttemptSec(std::numeric_limits<uint64_t>::max())
 {
-    queue_init(&m_qGPSData, sizeof(GPSData*), 10); // Initialize the queue with a capacity of 10
+    queue_init(&m_qIncomingGPSData, sizeof(GPSData::Shared*), 10); // Initialize the queue with a capacity of 10
+    queue_init(&m_qDisplayGPSData, sizeof(GPSData::Shared*), 10);  // Initialize the queue with a capacity of 10
 }
 
 GPS_TFT::~GPS_TFT()
@@ -91,9 +92,10 @@ void GPS_TFT::Initialize()
     // Initialize display
     m_spDisplay->SetFont(get_recommended_font(nFontSize));
 
-    showWaitingForGPS();
+    showScreenMessage("Waiting for GPS data");
 
     m_spGPS->SetGpsDataCallback(this, gpsDataCB);
+    m_spGPS->SetMessageCallback(this, messageCB);
 
     m_spIdleTimer = std::make_shared<AlarmTimer>([this]() {
         m_bShowWaitingForGPS = true;
@@ -125,7 +127,11 @@ void GPS_TFT::Run()
         while (true)
         {
             multicore_fifo_pop_blocking(); // Wait for signal from core 0
-            pThis->updateUI();
+            GPSData::Shared spGPSData = dequeueLatestGPSData(pThis->m_qDisplayGPSData);
+            if (spGPSData)
+            {
+                pThis->updateUI(spGPSData);
+            }
         }
     });
 #endif
@@ -137,38 +143,60 @@ void GPS_TFT::Run()
 #if !defined(GPS_ON_CORE_1)
         m_spGPS->RunOnce();
 #endif
-        bool bHasQueuedGpsData = false;
-        GPSData::Shared spGPSData;
-        // Check if we have new GPS data to display, just take the most recent one and discard the rest to avoid UI lag
-        while (!queue_is_empty(&m_qGPSData))
-        {
-            GPSData* pGPSData = nullptr;
-            bHasQueuedGpsData = true;
-            queue_try_remove(&m_qGPSData, &pGPSData);
-            spGPSData = GPSData::Shared(pGPSData);
-        }
+        GPSData::Shared spGPSData = dequeueLatestGPSData(m_qIncomingGPSData);
 
-        if (bHasQueuedGpsData && spGPSData)
+        if (spGPSData)
         {
-            LogInfo("GPS_TFT - Updating UI");
-            m_spGPSData = std::move(spGPSData);
-            blinkLED();
-            updateTime();
-            getVsysVoltage();
+            LogInfo("GPS_TFT - Processing new GPS data");
+            // Perform operations that need to run on core 0 (main core)
+            blinkLED(spGPSData->bHasPosition, spGPSData->bExternalAntenna);
+            updateTime(spGPSData->strGPSTimeRaw, spGPSData->strGPSDateRaw);
+            spGPSData->strVsys = getVsysVoltage();
 #if defined(DISPLAY_ON_CORE_1)
-            multicore_fifo_push_blocking(0);
+            // Hand ownership across cores; queue holds a heap-allocated shared_ptr wrapper only
+            if (enqueueGPSData(m_qDisplayGPSData, spGPSData))
+            {
+                multicore_fifo_push_blocking(0);
+            }
 #else
-            updateUI();
+            updateUI(spGPSData);
 #endif
             m_spIdleTimer->Start(10000); // Reset the idle timer to 10 seconds
         }
         if (m_bShowWaitingForGPS)
         {
             LogInfo("GPS_TFT - No GPS data received showing waiting message");
-            showWaitingForGPS();
+            showScreenMessage("Waiting for GPS data");
             m_bShowWaitingForGPS = false;
         }
     }
+}
+
+bool GPS_TFT::enqueueGPSData(queue_t& q, const GPSData::Shared& spData)
+{
+    GPSData::Shared* pspData = new GPSData::Shared(spData);
+    if (!queue_try_add(&q, &pspData))
+    {
+        delete pspData;
+        return false;
+    }
+    return true;
+}
+
+GPSData::Shared GPS_TFT::dequeueLatestGPSData(queue_t& q)
+{
+    GPSData::Shared spLatest;
+    GPSData::Shared* pspData = nullptr;
+    while (queue_try_remove(&q, &pspData))
+    {
+        if (pspData)
+        {
+            spLatest = *pspData; // shares ownership of the underlying GPSData with the queued copy
+            delete pspData;      // only deletes the heap-allocated wrapper, not the GPSData itself
+        }
+        pspData = nullptr;
+    }
+    return spLatest;
 }
 
 void GPS_TFT::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
@@ -185,53 +213,63 @@ void GPS_TFT::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
         return;
     }
 
-    // Make a deep copy of the GPSData to avoid issues with shared ownership and data races
-    auto upGPSDataCopy = std::make_unique<GPSData>(*spGPSData);
-
-    GPSData* pGPSDataCopy = upGPSDataCopy.release(); // owned by the queue now
-    queue_try_add(&pThis->m_qGPSData, &pGPSDataCopy);
+    // Deep copy the GPSData once here; all subsequent hand-offs share ownership of this copy.
+    enqueueGPSData(pThis->m_qIncomingGPSData, std::make_shared<GPSData>(*spGPSData));
 }
 
-void GPS_TFT::showWaitingForGPS()
+void GPS_TFT::messageCB(void* pCtx, std::string strMessage)
+{
+    LogInfo("GPS_TFT - received message: " + strMessage);
+    GPS_TFT* pThis = reinterpret_cast<GPS_TFT*>(pCtx);
+    if (nullptr == pThis)
+    {
+        LogInfo("messageCB: pCtx is null");
+        return;
+    }
+
+    pThis->showScreenMessage(strMessage);
+}
+
+void GPS_TFT::showScreenMessage(std::string strMessage)
 {
     m_spDisplay->Clear(COLOUR_BLACK);
     auto nQuadrant = m_spDisplay->GetQuadrants().front();
     m_spDisplay->SetQuadrant(nQuadrant);
-    drawText(0, "Waiting for GPS data", COLOUR_RED, false, 0);
+    drawText(0, strMessage, COLOUR_RED, false, 0);
     m_spDisplay->Show();
 }
 
-void GPS_TFT::blinkLED()
+void GPS_TFT::blinkLED(bool bHasPosition, bool bExternalAntenna)
 {
     if (m_spLED)
     {
-        if (m_spGPSData->bHasPosition)
+        if (bHasPosition)
         {
-            m_spLED->SetPixel(0, m_spGPSData->bExternalAntenna ? led_blue : led_green);
+            m_spLED->SetPixel(0, bExternalAntenna ? led_blue : led_green);
         }
         else
         {
-            m_spLED->SetPixel(0, m_spGPSData->bExternalAntenna ? led_magenta : led_red);
+            m_spLED->SetPixel(0, bExternalAntenna ? led_magenta : led_red);
         }
         m_spLED->Blink_ms(20);
     }
 }
 
-void GPS_TFT::updateTime()
+void GPS_TFT::updateTime(std::string strGPSTimeRaw, std::string strGPSDateRaw)
 {
     // Update the system time if necessary
-    if (!m_spGPSData->strGPSTimeRaw.empty() && !m_spGPSData->strGPSDateRaw.empty())
+    if (!strGPSTimeRaw.empty() && !strGPSDateRaw.empty())
     {
         const uint64_t uptimeSec = time_us_64() / 1000000;
         const bool bNeverRetried = (m_nLastTimeSyncAttemptSec == std::numeric_limits<uint64_t>::max());
         const bool bUpdateDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
                                 (uptimeSec - m_nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec) ||
-                                !TimeMgr::IsGpsTimeDateWithinOneSecond(m_spGPSData->strGPSTimeRaw, m_spGPSData->strGPSDateRaw);
+                                !TimeMgr::IsGpsTimeDateWithinOneSecond(strGPSTimeRaw, strGPSDateRaw);
         if (bUpdateDue)
         {
             m_nLastTimeSyncAttemptSec = uptimeSec;
             LogInfo("Attempting GPS time sync");
-            if (TimeMgr::SetTimeFromGps(m_spGPSData->strGPSTimeRaw, m_spGPSData->strGPSDateRaw))
+            if (TimeMgr::SetTimeFromGps(strGPSTimeRaw, strGPSDateRaw))
             {
                 LogInfo("GPS time synchronized");
             }
@@ -243,12 +281,12 @@ void GPS_TFT::updateTime()
     }
 }
 
-void GPS_TFT::getVsysVoltage()
+std::string GPS_TFT::getVsysVoltage()
 {
-#if defined(PLATFORM_PICO) // Only the Raspberry Pi Pico have a VSYS voltage monitor
+    std::string strVsys;
+#if defined(PLATFORM_PICO) && defined(DISPLAY_VSYS_VOLTAGE) // Only the Raspberry Pi Pico series have a VSYS voltage monitor
     float vsys = 0.0;
     bool bBattery = false;
-    std::string strVsys;
     if (PICO_OK == power_voltage(&vsys))
     {
         power_source(&bBattery);
@@ -257,12 +295,13 @@ void GPS_TFT::getVsysVoltage()
         oss << (bBattery ? "batt: " : "vsys: ") << std::fixed << std::setfill(' ') << std::setprecision(1) << vsys << "v";
         strVsys = oss.str();
     }
-    m_spGPSData->strVsys = strVsys;
+    LogInfo("getVsysVoltage: " + strVsys);
 #endif
+    return strVsys;
 }
 
 // Update the UI with the latest GPS data.
-void GPS_TFT::updateUI()
+void GPS_TFT::updateUI(GPSData::Shared spGPSData)
 {
     LogInfo("GPS_TFT - updateUI() called");
     uint16_t nWidth = m_spDisplay->Width();
@@ -288,55 +327,55 @@ void GPS_TFT::updateUI()
         // Draw satellite grid, 3 rings
         if (m_spDisplay->Landscape())
         {
-            drawSatGrid(nWidth / 4 + X_PAD, nHeight / 2, nWidth / 4 - X_PAD / 2, 3);
+            drawSatGrid(spGPSData, nWidth / 4 + X_PAD, nHeight / 2, nWidth / 4 - X_PAD / 2, 3);
         }
         else
         {
-            drawSatGrid(nWidth / 3 + X_PAD, nHeight / 2, nWidth / 3 - X_PAD / 2, 3);
+            drawSatGrid(spGPSData, nWidth / 3 + X_PAD, nHeight / 2, nWidth / 3 - X_PAD / 2, 3);
         }
 
         // Draw fix and #sats text
-        drawText(0, m_spGPSData->strMode3D + (m_spGPSData->bExternalAntenna ? "*" : ""), COLOUR_WHITE, false, X_PAD);
-        drawText(3, m_spGPSData->strNumSats, COLOUR_WHITE, true, X_PAD);
+        drawText(0, spGPSData->strMode3D + (spGPSData->bExternalAntenna ? "*" : ""), COLOUR_WHITE, false, X_PAD);
+        drawText(3, spGPSData->strNumSats, COLOUR_WHITE, true, X_PAD);
 
-        if (!m_spGPSData->strLatitude.empty())
+        if (!spGPSData->strLatitude.empty())
         {
-            drawText(0, m_spGPSData->strLatitude, COLOUR_WHITE, true, X_PAD);
-            drawText(1, m_spGPSData->strLongitude, COLOUR_WHITE, true, X_PAD);
-            drawText(2, m_spGPSData->strAltitude, COLOUR_WHITE, true, X_PAD);
-            drawText(4, m_spGPSData->strSpeed, COLOUR_WHITE, true, X_PAD);
+            drawText(0, spGPSData->strLatitude, COLOUR_WHITE, true, X_PAD);
+            drawText(1, spGPSData->strLongitude, COLOUR_WHITE, true, X_PAD);
+            drawText(2, spGPSData->strAltitude, COLOUR_WHITE, true, X_PAD);
+            drawText(4, spGPSData->strSpeed, COLOUR_WHITE, true, X_PAD);
         }
-        if (!m_spGPSData->strGPSTime.empty())
+        if (!spGPSData->strGPSTime.empty())
         {
-            drawText(5, m_spGPSData->strGPSTime, COLOUR_WHITE, true, X_PAD);
+            drawText(5, spGPSData->strGPSTime, COLOUR_WHITE, true, X_PAD);
         }
 
 #if defined(PLATFORM_PICO)
-        if (!m_spGPSData->strVsys.empty())
+        if (!spGPSData->strVsys.empty())
         {
-            drawText(6, m_spGPSData->strVsys, COLOUR_WHITE, true, X_PAD);
+            drawText(6, spGPSData->strVsys, COLOUR_WHITE, true, X_PAD);
         }
 #endif
 
         // Draw clock
-        if (!m_spGPSData->strGPSTime.empty())
+        if (!spGPSData->strGPSTime.empty())
         {
             uint lineHeight = getCharHeight() + 1;
             uint radius = m_spDisplay->ShorterSide() / 8;
             uint xPos = m_spDisplay->Landscape() ? nWidth / 2 : X_PAD + getCharWidth() * 3;
-            drawClock(xPos, lineHeight * PAD_CHARS_Y, radius, m_spGPSData->strGPSTime);
+            drawClock(xPos, lineHeight * PAD_CHARS_Y, radius, spGPSData->strGPSTime);
         }
 
         // Draw bar graph
-        if (m_spGPSData->mSatList.size() > 0)
+        if (spGPSData->mSatList.size() > 0)
         {
             if (m_spDisplay->Landscape())
             {
-                drawBarGraph(nWidth / 2, nHeight * 2 / 3, nWidth / 2 - X_PAD, nHeight / 3 - Y_PAD);
+                drawBarGraph(spGPSData, nWidth / 2, nHeight * 2 / 3, nWidth / 2 - X_PAD, nHeight / 3 - Y_PAD);
             }
             else
             {
-                drawBarGraph(nWidth / 4, nHeight * 3 / 4, 3 * nWidth / 4 - X_PAD, nHeight / 4 - Y_PAD);
+                drawBarGraph(spGPSData, nWidth / 4, nHeight * 3 / 4, 3 * nWidth / 4 - X_PAD, nHeight / 4 - Y_PAD);
             }
         }
 
@@ -356,7 +395,7 @@ void GPS_TFT::updateUI()
 #endif
 }
 
-void GPS_TFT::drawSatGrid(uint xCenter, uint yCenter, uint radius, uint nRings)
+void GPS_TFT::drawSatGrid(const GPSData::Shared& spGPSData, uint xCenter, uint yCenter, uint radius, uint nRings)
 {
     for (uint i = 1; i <= nRings; ++i)
     {
@@ -371,17 +410,17 @@ void GPS_TFT::drawSatGrid(uint xCenter, uint yCenter, uint radius, uint nRings)
     // m_spDisplay->Text("`", xCenter-2, yCenter-radius-CHAR_HEIGHT/2, COLOUR_RED);
 
     int satRadius = SAT_ICON_RADIUS / 2;
-    if (!m_spGPSData->strLatitude.empty())
+    if (!spGPSData->strLatitude.empty())
     {
         satRadius = SAT_ICON_RADIUS;
     }
-    for (auto oEntry : m_spGPSData->mSatList)
+    for (auto oEntry : spGPSData->mSatList)
     {
         auto oSat = oEntry.second;
         double elrad = oSat.m_el * pi / 180;
         double azrad = oSat.m_az * pi / 180;
         drawCircleSat(xCenter, yCenter, radius, elrad, azrad, satRadius, COLOUR_WHITE, COLOUR_BLACK);
-        for (auto nSat : m_spGPSData->vUsedList)
+        for (auto nSat : spGPSData->vUsedList)
         {
             if (oSat.m_num == nSat)
             {
@@ -410,7 +449,7 @@ void GPS_TFT::drawCircleSat(uint gridCenterX,
     m_spDisplay->Ellipse(x, y, satRadius, satRadius, color);           // Draw circle without fill
 }
 
-void GPS_TFT::drawBarGraph(uint x, uint y, uint width, uint height)
+void GPS_TFT::drawBarGraph(const GPSData::Shared& spGPSData, uint x, uint y, uint width, uint height)
 {
     const BitmapFont* pFont = get_recommended_font(12); // 6x12, narrowest font for bar graph
 
@@ -421,10 +460,10 @@ void GPS_TFT::drawBarGraph(uint x, uint y, uint width, uint height)
     uint barDelta = bNarrow ? std::max(std::min(charWidth * 2 + 4, width / nMaxSats), charWidth * 2)
                             : std::max(std::min(charWidth + 4, width / nMaxSats), charWidth);
     uint barWidth = barDelta - 2;
-    uint barPosX = x + width - (m_spGPSData->mSatList.size() * barDelta);
+    uint barPosX = x + width - (spGPSData->mSatList.size() * barDelta);
     uint barHeightMax = height - (charHeight + 1) * 2;
 
-    for (auto oEntry : m_spGPSData->mSatList)
+    for (auto oEntry : spGPSData->mSatList)
     {
         auto oSat = oEntry.second;
         uint rssi = oSat.m_rssi;
@@ -451,7 +490,7 @@ void GPS_TFT::drawBarGraph(uint x, uint y, uint width, uint height)
         {
             m_spDisplay->Rect(barPosX + 1, baseLineY - barHeight + 1, barWidth, barHeight, COLOUR_WHITE);
         }
-        for (auto nSat : m_spGPSData->vUsedList)
+        for (auto nSat : spGPSData->vUsedList)
         {
             if (oSat.m_num == nSat)
             {
