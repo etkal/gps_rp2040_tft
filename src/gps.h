@@ -16,7 +16,7 @@
 
 #include "pico/sync.h"
 
-#include "timemgr.h"
+#include "timers.h"
 
 class SatInfo
 {
@@ -56,13 +56,16 @@ public:
           strLatitude(rhs.strLatitude),
           strLongitude(rhs.strLongitude),
           strAltitude(rhs.strAltitude),
+          strAltitudeFeet(rhs.strAltitudeFeet),
           strNumSats(rhs.strNumSats),
           strGPSTimeRaw(rhs.strGPSTimeRaw),
           strGPSDateRaw(rhs.strGPSDateRaw),
           strGPSTime(rhs.strGPSTime),
           strMode3D(rhs.strMode3D),
           strSpeed(rhs.strSpeed),
-          strVsys(rhs.strVsys),
+          strSpeedKts(rhs.strSpeedKts),
+          strSpeedKph(rhs.strSpeedKph),
+          strSpeedMph(rhs.strSpeedMph),
           mSatList(rhs.mSatList),
           vUsedList(rhs.vUsedList)
     {
@@ -75,13 +78,16 @@ public:
     std::string strLatitude;
     std::string strLongitude;
     std::string strAltitude;
+    std::string strAltitudeFeet;
     std::string strNumSats;
     std::string strGPSTimeRaw; // Raw GPS time in HHMMSS format
     std::string strGPSDateRaw; // Raw GPS date in DDMMYY format
     std::string strGPSTime;    // Formatted GPS time string in HH:MM:SSZ format
     std::string strMode3D;
     std::string strSpeed;
-    std::string strVsys;
+    std::string strSpeedKts;
+    std::string strSpeedKph;
+    std::string strSpeedMph;
     SatList mSatList;
     UsedList vUsedList;
 };
@@ -90,7 +96,7 @@ typedef void (*sentenceCallback)(void* pCtx, std::string strSentence);
 typedef void (*gpsDataCallback)(void* pCtx, GPSData::Shared spGPSData);
 typedef void (*messageCallback)(void* pCtx, std::string strMessage);
 
-class GPS
+class GPS : public std::enable_shared_from_this<GPS>
 {
 public:
     typedef std::shared_ptr<GPS> Shared;
@@ -100,8 +106,9 @@ public:
 
     // Derived classes can perform their own initialization and also invoke the base class function
     virtual void Initialize();
+    void Start();
     void Run();
-    void RunOnce();
+    void DoWork();
     void Stop();
 
     void SetSentenceCallback(void* pCtx, sentenceCallback pCB);
@@ -128,6 +135,7 @@ private:
 
     // GPS object members
     bool m_bExit {false};
+    bool m_bInitialized {false};
     bool m_bGSVInProgress {false};
     std::string m_strNumGSV;
     uint64_t m_nSatListTime {0};

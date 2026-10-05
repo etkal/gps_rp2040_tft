@@ -33,44 +33,25 @@
 #include "pico/stdlib.h"
 #include "pico/double.h"
 #include "pico/multicore.h"
-#if defined(PLATFORM_PICO_W)
-#include "pico/cyw43_arch.h"
-#endif
 
 #include "ili_tft.h"
-#include "power_status.h"
 #include "font_factory.h"
-
-#if !defined(NDEBUG)
-#include <malloc.h>
-static uint32_t getTotalHeap()
-{
-    extern char __StackLimit, __bss_end__;
-    return &__StackLimit - &__bss_end__;
-}
-static uint32_t getFreeHeap()
-{
-    struct mallinfo m = mallinfo();
-    return getTotalHeap() - m.uordblks;
-}
-#endif
+#include "log.h"
+#include "timemgr.h"
 
 #define SAT_ICON_RADIUS 4
 
 namespace
 {
-    constexpr uint64_t timeSyncRetryIntervalSec = 5 * 60;
     constexpr double pi = 3.14159265359;
 } // namespace
 
-GPS_TFT::GPS_TFT(ILI_TFT::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED)
+GPS_TFT::GPS_TFT(ILI_TFT::Shared spDisplay, GPS::Shared spGPS, Button::Shared spButton)
     : m_spDisplay(spDisplay),
       m_spGPS(spGPS),
-      m_spLED(spLED),
-      m_nLastTimeSyncAttemptSec(std::numeric_limits<uint64_t>::max())
+      m_spButton(spButton)
 {
-    queue_init(&m_qIncomingGPSData, sizeof(GPSData::Shared*), 10); // Initialize the queue with a capacity of 10
-    queue_init(&m_qDisplayGPSData, sizeof(GPSData::Shared*), 10);  // Initialize the queue with a capacity of 10
+    critical_section_init(&m_CallbackCs);
 }
 
 GPS_TFT::~GPS_TFT()
@@ -79,98 +60,140 @@ GPS_TFT::~GPS_TFT()
 
 void GPS_TFT::Initialize()
 {
+    m_bInitialized = true;
+    queue_init(&m_qIncomingGPSData, sizeof(GPSData::Shared*), 10); // Initialize the queue with a capacity of 10
+
     m_spDisplay->Initialize();
-    for (auto nQuadrant : m_spDisplay->GetQuadrants())
-    {
-        m_spDisplay->SetQuadrant(nQuadrant);
-        m_spDisplay->Fill(COLOUR_BLACK);
-        m_spDisplay->Show();
-    }
+    m_spDisplay->Clear();
+#if !defined(NDEBUG)
+    showSplashScreen();
+#endif
 
     auto nFontSize = m_spDisplay->get_recommended_font_size();
-
-    // Initialize display
     m_spDisplay->SetFont(get_recommended_font(nFontSize));
-
-    showScreenMessage("Waiting for GPS data");
+    m_bShowWaitingForGPS = true;
 
     m_spGPS->SetGpsDataCallback(this, gpsDataCB);
     m_spGPS->SetMessageCallback(this, messageCB);
+    if (m_spButton)
+    {
+        m_spButton->SetEventCallback(this, buttonEventCB);
+    }
 
     m_spIdleTimer = std::make_shared<AlarmTimer>([this]() {
         m_bShowWaitingForGPS = true;
     });
 }
 
+void GPS_TFT::Start()
+{
+#if defined(DISPLAY_ON_CORE_1)
+    static auto sm_spThis = shared_from_this(); // Capture pointer for use in lambda
+    // Default core 1 stack is only 4KB; iostream/ostringstream logging overflows it
+    static uint32_t sm_core1Stack[16 * 1024 / sizeof(uint32_t)];
+    multicore_launch_core1_with_stack(
+        []() {
+            GPS_TFT::Shared spThis = sm_spThis;
+            // Initialize and run the GPS processing loop on core 1
+            LogInfo("Starting GPS_TFT processing on core 1");
+            spThis->Initialize();
+            spThis->Run();
+        },
+        sm_core1Stack,
+        sizeof(sm_core1Stack));
+#else
+    LogInfo("Initializing GPS_TFT processing on core 0");
+    Initialize();
+#endif
+}
+
 void GPS_TFT::Run()
 {
-#if defined(GPS_ON_CORE_1)
-    // Start GPS processing loop on processor core 1
-    static auto sm_spGPS = m_spGPS; // Capture shared pointer for use in lambda
-    multicore_launch_core1([]() {
-        GPS::Shared spGPS = sm_spGPS;
-        // Initialize and run the GPS processing loop on core 1
-        LogInfo("Starting GPS processing on core 1");
-        spGPS->Initialize();
-        spGPS->Run();
-    });
-#else
-    // If we are not using multicore, we can run the GPS processing from the display loop
-    LogInfo("Starting GPS processing on core 0");
-    m_spGPS->Initialize();
-#endif // GPS_ON_CORE_1
-
 #if defined(DISPLAY_ON_CORE_1)
-    static auto sm_pThis = this; // Capture pointer for use in lambda
-    multicore_launch_core1([]() {
-        GPS_TFT* pThis = sm_pThis;
-        while (true)
-        {
-            multicore_fifo_pop_blocking(); // Wait for signal from core 0
-            GPSData::Shared spGPSData = dequeueLatestGPSData(pThis->m_qDisplayGPSData);
-            if (spGPSData)
-            {
-                pThis->updateUI(spGPSData);
-            }
-        }
-    });
-#endif
-
-    // Main loop for updating the display
-    while (true)
+    while (!m_bExit)
     {
-        m_spLED->CheckForWork();
-#if !defined(GPS_ON_CORE_1)
-        m_spGPS->RunOnce();
+        DoWork();
+    }
+#else
+    LogInfo("GPS_TFT::Run() should not be called on core 0");
+    return;
 #endif
-        GPSData::Shared spGPSData = dequeueLatestGPSData(m_qIncomingGPSData);
+}
 
+void GPS_TFT::DoWork()
+{
+#if defined(DISPLAY_ON_CORE_1)
+    if (0 == get_core_num())
+    {
+        return; // Skip processing on core 0 if GPS_TFT is running on core 1
+    }
+#endif
+    if (!m_bInitialized)
+    {
+        return;
+    }
+    if (!m_bExit)
+    {
+        if (handleButtonEvent() && m_spLastGPSData)
+        {
+            // Redraw immediately with the last known data rather than waiting for the next GPS update
+            updateUI(m_spLastGPSData);
+        }
+        GPSData::Shared spGPSData = dequeueLatestGPSData(m_qIncomingGPSData);
         if (spGPSData)
         {
-            LogInfo("GPS_TFT - Processing new GPS data");
-            // Perform operations that need to run on core 0 (main core)
-            blinkLED(spGPSData->bHasPosition, spGPSData->bExternalAntenna);
-            updateTime(spGPSData->strGPSTimeRaw, spGPSData->strGPSDateRaw);
-            spGPSData->strVsys = getVsysVoltage();
-#if defined(DISPLAY_ON_CORE_1)
-            // Hand ownership across cores; queue holds a heap-allocated shared_ptr wrapper only
-            if (enqueueGPSData(m_qDisplayGPSData, spGPSData))
-            {
-                multicore_fifo_push_blocking(0);
-            }
-#else
+            LogInfoD("GPS_TFT - Processing new GPS data");
+            m_bShowWaitingForGPS = false;
+            critical_section_enter_blocking(&m_CallbackCs);
+            m_bStatusChanged = true;
+            m_bHasPosition = spGPSData->bHasPosition;
+            m_bExternalAntenna = spGPSData->bExternalAntenna;
+            m_strGpsTimeRaw = spGPSData->strGPSTimeRaw;
+            m_strGpsDateRaw = spGPSData->strGPSDateRaw;
+            critical_section_exit(&m_CallbackCs);
+            m_spLastGPSData = spGPSData;
             updateUI(spGPSData);
-#endif
-            m_spIdleTimer->Start(10000); // Reset the idle timer to 10 seconds
+            m_spIdleTimer->Start(5000); // Reset the idle timer
         }
         if (m_bShowWaitingForGPS)
         {
             LogInfo("GPS_TFT - No GPS data received showing waiting message");
+            critical_section_enter_blocking(&m_CallbackCs);
+            m_bStatusChanged = true;
+            m_bHasPosition = false;
+            m_bExternalAntenna = false;
+            m_strGpsTimeRaw.clear();
+            m_strGpsDateRaw.clear();
+            critical_section_exit(&m_CallbackCs);
             showScreenMessage("Waiting for GPS data");
             m_bShowWaitingForGPS = false;
         }
     }
 }
+
+// Stop the GPS_TFT processing loop. This will cause Run() to return.
+void GPS_TFT::Stop()
+{
+    m_bExit = true;
+}
+
+bool GPS_TFT::GetStatus(GPS_Status& status)
+{
+    critical_section_enter_blocking(&m_CallbackCs);
+    if (!m_bStatusChanged)
+    {
+        critical_section_exit(&m_CallbackCs);
+        return false;
+    }
+    m_bStatusChanged = false;
+    status.bHasPosition = m_bHasPosition;
+    status.bExternalAntenna = m_bExternalAntenna;
+    status.strGpsTimeRaw = m_strGpsTimeRaw;
+    status.strGpsDateRaw = m_strGpsDateRaw;
+    critical_section_exit(&m_CallbackCs);
+    return true;
+}
+
 
 bool GPS_TFT::enqueueGPSData(queue_t& q, const GPSData::Shared& spData)
 {
@@ -197,6 +220,45 @@ GPSData::Shared GPS_TFT::dequeueLatestGPSData(queue_t& q)
         pspData = nullptr;
     }
     return spLatest;
+}
+
+bool GPS_TFT::handleButtonEvent()
+{
+    critical_section_enter_blocking(&m_CallbackCs);
+    if (ButtonEvent::None == m_eLastButtonEvent)
+    {
+        critical_section_exit(&m_CallbackCs);
+        return false;
+    }
+    if (ButtonEvent::Tap == m_eLastButtonEvent)
+    {
+        LogInfoD("GPS_TFT - Button tap detected");
+    }
+    else if (ButtonEvent::Press == m_eLastButtonEvent)
+    {
+        LogInfoD("GPS_TFT - Button press detected");
+    }
+    else if (ButtonEvent::LongPress == m_eLastButtonEvent)
+    {
+        LogInfoD("GPS_TFT - Long button press detected");
+    }
+
+    switch (m_eLastButtonEvent)
+    {
+    case ButtonEvent::Tap:
+        break;
+    case ButtonEvent::Press:
+        break;
+    case ButtonEvent::LongPress:
+        break;
+    default:
+        break;
+    }
+
+    // Reset the last button event after handling
+    m_eLastButtonEvent = ButtonEvent::None;
+    critical_section_exit(&m_CallbackCs);
+    return true; // trigger a display update on state change
 }
 
 void GPS_TFT::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
@@ -230,6 +292,34 @@ void GPS_TFT::messageCB(void* pCtx, std::string strMessage)
     pThis->showScreenMessage(strMessage);
 }
 
+void GPS_TFT::buttonEventCB(void* pCtx, ButtonEvent eType)
+{
+    GPS_TFT* pThis = reinterpret_cast<GPS_TFT*>(pCtx);
+    if (nullptr == pThis)
+    {
+        LogInfo("buttonEventCB: pCtx is null");
+        return;
+    }
+
+    // Handle button events here
+    critical_section_enter_blocking(&pThis->m_CallbackCs);
+    switch (eType)
+    {
+    case ButtonEvent::Tap:
+        pThis->m_eLastButtonEvent = ButtonEvent::Tap;
+        break;
+    case ButtonEvent::Press:
+        pThis->m_eLastButtonEvent = ButtonEvent::Press;
+        break;
+    case ButtonEvent::LongPress:
+        pThis->m_eLastButtonEvent = ButtonEvent::LongPress;
+        break;
+    default:
+        break;
+    }
+    critical_section_exit(&pThis->m_CallbackCs);
+}
+
 void GPS_TFT::showScreenMessage(std::string strMessage)
 {
     m_spDisplay->Clear(COLOUR_BLACK);
@@ -237,67 +327,6 @@ void GPS_TFT::showScreenMessage(std::string strMessage)
     m_spDisplay->SetQuadrant(nQuadrant);
     drawText(0, strMessage, COLOUR_RED, false, 0);
     m_spDisplay->Show();
-}
-
-void GPS_TFT::blinkLED(bool bHasPosition, bool bExternalAntenna)
-{
-    if (m_spLED)
-    {
-        if (bHasPosition)
-        {
-            m_spLED->SetPixel(0, bExternalAntenna ? led_blue : led_green);
-        }
-        else
-        {
-            m_spLED->SetPixel(0, bExternalAntenna ? led_magenta : led_red);
-        }
-        m_spLED->Blink_ms(20);
-    }
-}
-
-void GPS_TFT::updateTime(std::string strGPSTimeRaw, std::string strGPSDateRaw)
-{
-    // Update the system time if necessary
-    if (!strGPSTimeRaw.empty() && !strGPSDateRaw.empty())
-    {
-        const uint64_t uptimeSec = time_us_64() / 1000000;
-        const bool bNeverRetried = (m_nLastTimeSyncAttemptSec == std::numeric_limits<uint64_t>::max());
-        const bool bUpdateDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
-                                (uptimeSec - m_nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec) ||
-                                !TimeMgr::IsGpsTimeDateWithinOneSecond(strGPSTimeRaw, strGPSDateRaw);
-        if (bUpdateDue)
-        {
-            m_nLastTimeSyncAttemptSec = uptimeSec;
-            LogInfo("Attempting GPS time sync");
-            if (TimeMgr::SetTimeFromGps(strGPSTimeRaw, strGPSDateRaw))
-            {
-                LogInfo("GPS time synchronized");
-            }
-            else
-            {
-                LogInfo("GPS time sync failed");
-            }
-        }
-    }
-}
-
-std::string GPS_TFT::getVsysVoltage()
-{
-    std::string strVsys;
-#if defined(PLATFORM_PICO) && defined(DISPLAY_VSYS_VOLTAGE) // Only the Raspberry Pi Pico series have a VSYS voltage monitor
-    float vsys = 0.0;
-    bool bBattery = false;
-    if (PICO_OK == power_voltage(&vsys))
-    {
-        power_source(&bBattery);
-        vsys = floorf(vsys * 100) / 100;
-        std::stringstream oss;
-        oss << (bBattery ? "batt: " : "vsys: ") << std::fixed << std::setfill(' ') << std::setprecision(1) << vsys << "v";
-        strVsys = oss.str();
-    }
-    LogInfo("getVsysVoltage: " + strVsys);
-#endif
-    return strVsys;
 }
 
 // Update the UI with the latest GPS data.
@@ -350,13 +379,6 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
             drawText(5, spGPSData->strGPSTime, COLOUR_WHITE, true, X_PAD);
         }
 
-#if defined(PLATFORM_PICO)
-        if (!spGPSData->strVsys.empty())
-        {
-            drawText(6, spGPSData->strVsys, COLOUR_WHITE, true, X_PAD);
-        }
-#endif
-
         // Draw clock
         if (!spGPSData->strGPSTime.empty())
         {
@@ -380,8 +402,7 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
         }
 
 #if !defined(NDEBUG)
-        drawText(7, "Show: " + std::to_string(showTime / 1000) + "ms", COLOUR_WHITE, true, X_PAD);
-        drawText(8, "Free: " + std::to_string(getFreeHeap() / 1000) + "kB", COLOUR_WHITE, true, X_PAD);
+        drawText(8, "Show: " + std::to_string(showTime / 1000) + "ms", COLOUR_WHITE, true, X_PAD);
 #endif
 
         // blit the framebuf to the display quadrant
@@ -391,7 +412,6 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
 #if !defined(NDEBUG)
     showTime = time_us_64() - startTime;
     LogInfo("Frame show: " + std::to_string(showTime / 1000) + "ms");
-    LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));
 #endif
 }
 
@@ -548,18 +568,62 @@ void GPS_TFT::drawClock(uint x, uint y, uint radius, std::string strTime)
     }
     // Draw the hands
     m_spDisplay->Line(xCenter, yCenter, xCenter + dxs, yCenter + dys, secondHandColor);
+#if 1 // Normal 1-pixel hands
     m_spDisplay->Line(xCenter, yCenter, xCenter + dxh, yCenter + dyh, handColor);
     m_spDisplay->Line(xCenter, yCenter, xCenter + dxm, yCenter + dym, handColor);
-    // m_spDisplay->ellipse(xCenter, yCenter, 1, 1, faceColor, true);
+#else // Thicker hour/minute hands, better on some displays
+    auto drawThickHand = [this, xCenter, yCenter, handColor](int dx, int dy) {
+        int xTip = xCenter + dx;
+        int yTip = yCenter + dy;
+        int x = xCenter;
+        int y = yCenter;
+        int deltaX = abs(xTip - x);
+        int stepX = (x < xTip) ? 1 : -1;
+        int deltaY = -abs(yTip - y);
+        int stepY = (y < yTip) ? 1 : -1;
+        int error = deltaX + deltaY;
+
+        while (true)
+        {
+            if (x == xTip && y == yTip)
+            {
+                m_spDisplay->SetPixel(x, y, handColor);
+                break;
+            }
+
+            m_spDisplay->FillRect(x - 1, y - 1, 3, 3, handColor);
+
+            int doubledError = 2 * error;
+            if (doubledError >= deltaY)
+            {
+                error += deltaY;
+                x += stepX;
+            }
+            if (doubledError <= deltaX)
+            {
+                error += deltaX;
+                y += stepY;
+            }
+        }
+    };
+    drawThickHand(dxh, dyh);
+    drawThickHand(dxm, dym);
+#endif
 }
 
 int GPS_TFT::linePos(int nLine)
 {
     constexpr uint PAD_CHARS_Y = 1;
     if (nLine >= 0)
+    {
         return (nLine + PAD_CHARS_Y) * getLineAdvance();
+    }
     else
-        return m_spDisplay->Height() + (nLine * getLineAdvance());
+    {
+        // Anchor the last line (-1) fully on screen so descenders aren't clipped,
+        // then step upward by the line advance for -2, -3, ...
+        return m_spDisplay->Height() - getCharHeight() + ((nLine + 1) * getLineAdvance());
+    }
 }
 
 void GPS_TFT::drawText(int nLine, std::string strText, uint16_t color, bool bRightAlign, uint nPadding)
@@ -570,3 +634,87 @@ void GPS_TFT::drawText(int nLine, std::string strText, uint16_t color, bool bRig
     x += bRightAlign ? -nPadding : nPadding;
     m_spDisplay->Text(strText.c_str(), x, y, color);
 }
+
+void GPS_TFT::drawTextCentered(int nLine, std::string strText, uint16_t color)
+{
+    int x = (m_spDisplay->Width() - (strText.length() * getCharWidth())) / 2;
+    int y = linePos(nLine);
+    m_spDisplay->Text(strText.c_str(), x, y, color);
+}
+
+#if !defined(NDEBUG)
+void GPS_TFT::showSplashScreen()
+{
+    // Palette demo splash: show all 16 named RGB565 colors with labels
+    struct NamedColour
+    {
+        const char* name;
+        const char* hex;
+        uint16_t value;
+    };
+
+    static const NamedColour colours[16] = {
+        {"BLACK",   "0x0000", COLOUR_BLACK  },
+        {"MAROON",  "0x8000", COLOUR_MAROON },
+        {"GREEN",   "0x0400", COLOUR_GREEN  },
+        {"OLIVE",   "0x8400", COLOUR_OLIVE  },
+        {"NAVY",    "0x0010", COLOUR_NAVY   },
+        {"PURPLE",  "0x8010", COLOUR_PURPLE },
+        {"TEAL",    "0x0410", COLOUR_TEAL   },
+        {"SILVER",  "0xC618", COLOUR_SILVER },
+        {"GRAY",    "0x8410", COLOUR_GRAY   },
+        {"RED",     "0xF800", COLOUR_RED    },
+        {"LIME",    "0x07E0", COLOUR_LIME   },
+        {"YELLOW",  "0xFFE0", COLOUR_YELLOW },
+        {"BLUE",    "0x001F", COLOUR_BLUE   },
+        {"FUCHSIA", "0xF81F", COLOUR_FUCHSIA},
+        {"AQUA",    "0x07FF", COLOUR_AQUA   },
+        {"WHITE",   "0xFFFF", COLOUR_WHITE  },
+    };
+
+    auto text_colour_for_bg = [](uint16_t c) -> uint16_t {
+        uint8_t r5 = (c >> 11) & 0x1f;
+        uint8_t g6 = (c >> 5) & 0x3f;
+        uint8_t b5 = c & 0x1f;
+        uint16_t r = (r5 * 255) / 31;
+        uint16_t g = (g6 * 255) / 63;
+        uint16_t b = (b5 * 255) / 31;
+        uint16_t luma = static_cast<uint16_t>((299u * r + 587u * g + 114u * b) / 1000u);
+        return (luma > 140) ? COLOUR_BLACK : COLOUR_WHITE;
+    };
+
+    const int cols = 4;
+    const int rows = 4;
+    int dispW = m_spDisplay->Width();
+    int dispH = m_spDisplay->Height();
+    int cellW = dispW / cols;
+    int cellH = dispH / rows;
+
+    auto nFontSize = m_spDisplay->get_recommended_font_size();
+    // Initialize display
+    m_spDisplay->SetFont(get_recommended_font(nFontSize));
+
+    for (auto nQuadrant : m_spDisplay->GetQuadrants())
+    {
+        m_spDisplay->SetQuadrant(nQuadrant);
+        m_spDisplay->Fill(COLOUR_BLACK);
+        for (int i = 0; i < 16; ++i)
+        {
+            int col = i % cols;
+            int row = i / cols;
+            int x = col * cellW;
+            int y = row * cellH;
+            int w = (col == cols - 1) ? (dispW - x) : cellW;
+            int h = (row == rows - 1) ? (dispH - y) : cellH;
+
+            m_spDisplay->FillRect(x, y, w, h, colours[i].value);
+            uint16_t textColour = text_colour_for_bg(colours[i].value);
+            m_spDisplay->Text(colours[i].name, x + 3, y + 3, textColour);
+            m_spDisplay->Text(colours[i].hex, x + 3, y + m_spDisplay->GetFont()->height + 3, textColour);
+        }
+
+        m_spDisplay->Show();
+    }
+    sleep_ms(2000);
+}
+#endif

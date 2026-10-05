@@ -28,7 +28,9 @@
 #include <iomanip>
 #include <cmath>
 
-#include "timemgr.h"
+#include "pico/multicore.h"
+
+#include "log.h"
 
 typedef enum eSentenceType
 {
@@ -58,30 +60,26 @@ namespace
     constexpr uint32_t gpsSendDataDelayMs = GPS_SEND_DATA_DELAY_MS;
 } // namespace
 
+static std::string formatDouble(double dValue, std::string strUnit)
+{
+    std::ostringstream oss;
+    if (dValue < 100.0)
+    {
+        oss << std::fixed << std::setfill(' ') << std::setprecision(1) << dValue << strUnit;
+    }
+    else
+    {
+        oss << std::setfill(' ') << std::setprecision(0) << dValue << strUnit;
+    }
+    return oss.str();
+}
+
 GPS::GPS()
 {
 }
 
 GPS::~GPS()
 {
-    if (m_spSendDataTimer)
-    {
-        m_spSendDataTimer->Stop();
-        m_spSendDataTimer.reset();
-    }
-    if (m_spIdleTimer)
-    {
-        m_spIdleTimer->Stop();
-        m_spIdleTimer.reset();
-    }
-    if (m_pAlarmPool)
-    {
-        if (1 == get_core_num())
-        {
-            LogInfo("GPS::~GPS() - Deleting alarm pool for core 1");
-            alarm_pool_destroy(m_pAlarmPool);
-        }
-    }
 }
 
 // Set the callback for when a valid sentence is received. This can be used by a derived class
@@ -108,15 +106,21 @@ void GPS::SetMessageCallback(void* pCtx, messageCallback pCB)
 
 void GPS::Initialize()
 {
+    if (m_bInitialized)
+    {
+        return;
+    }
+    m_bInitialized = true;
+
     // If we are on core 1 we need to ensure timers fire on that core.
     if (1 == get_core_num())
     {
-        LogInfo("GPS::Initialize() - Creating alarm pool for core 1");
+        LogInfo("GPS - Creating alarm pool for core 1");
         m_pAlarmPool = alarm_pool_create(1, 16);
     }
     else
     {
-        LogInfo("GPS::Initialize() - Using alarm pool for default core");
+        LogInfo("GPS - Using alarm pool for default core");
         m_pAlarmPool = alarm_pool_get_default();
     }
 
@@ -137,35 +141,100 @@ void GPS::Initialize()
     // we will clear the GPS data object so as to invalidate position information, etc.
     m_spIdleTimer = std::make_shared<AlarmTimer>(
         [this]() {
-            // LogInfo("GPS - No GPS data received, clearing GPS data");
+            LogInfo("GPS - No GPS data received, clearing GPS data");
             m_spGPSData.reset();
         },
         m_pAlarmPool);
 }
 
+// Setup and either run continuously with Run() or process a single iteration with DoWork()
+void GPS::Start()
+{
+#if defined(GPS_ON_CORE_1)
+    // Start GPS processing loop on processor core 1
+    static auto sm_spThis = shared_from_this(); // Capture shared pointer for use in lambda
+    // Default core 1 stack is only 4KB; iostream/ostringstream logging overflows it
+    static uint32_t sm_core1Stack[16 * 1024 / sizeof(uint32_t)];
+    multicore_launch_core1_with_stack(
+        []() {
+            GPS::Shared spThis = sm_spThis;
+            // Initialize and run the GPS processing loop on core 1
+            LogInfo("Starting GPS processing on core 1");
+            spThis->Initialize();
+            spThis->Run();
+        },
+        sm_core1Stack,
+        sizeof(sm_core1Stack));
+#else
+    LogInfo("Initializing GPS processing on core 0");
+    Initialize();
+#endif // GPS_ON_CORE_1
+}
+
 // Main loop for processing GPS sentences. This function will run until Stop() is called.
 void GPS::Run()
 {
+#if defined(GPS_ON_CORE_1)
     while (!m_bExit)
     {
-        RunOnce();
+        DoWork();
     }
+#else
+    LogInfo("GPS::Run() should not be called on core 0");
+    return;
+#endif
 }
 
-void GPS::RunOnce()
+void GPS::DoWork()
 {
-    std::string strSentence;
-    // Read sentence from GPS device
-    if (getSentence(strSentence))
+#if defined(GPS_ON_CORE_1)
+    if (0 == get_core_num())
     {
-        m_spIdleTimer->Start(5000);   // Start the idle timer to 5 seconds
-        processSentence(strSentence); // Process the sentence and update GPS data
+        return; // Skip processing on core 0 if GPS is running on core 1
     }
-
-    if (m_bSendGpsData)
+#endif
+    if (!m_bInitialized)
     {
-        m_bSendGpsData = false;
-        m_spSendDataTimer->Start(gpsSendDataDelayMs);
+        return;
+    }
+    if (!m_bExit)
+    {
+        std::string strSentence;
+        // Read sentence from GPS device
+        if (getSentence(strSentence))
+        {
+            m_spIdleTimer->Start(5000);   // Start the idle timer to 5 seconds
+            processSentence(strSentence); // Process the sentence and update GPS data
+        }
+
+        if (m_bSendGpsData)
+        {
+            m_bSendGpsData = false;
+            m_spSendDataTimer->Start(gpsSendDataDelayMs);
+        }
+    }
+    else
+    {
+        m_bInitialized = false;
+        if (m_spSendDataTimer)
+        {
+            m_spSendDataTimer->Stop();
+            m_spSendDataTimer.reset();
+        }
+        if (m_spIdleTimer)
+        {
+            m_spIdleTimer->Stop();
+            m_spIdleTimer.reset();
+        }
+        if (m_pAlarmPool)
+        {
+            if (1 == get_core_num())
+            {
+                LogInfo("GPS::~GPS() - Deleting alarm pool for core 1");
+                alarm_pool_destroy(m_pAlarmPool);
+            }
+        }
+        return;
     }
 }
 
@@ -184,7 +253,7 @@ bool GPS::processSentence(std::string strSentence)
         return false;
     }
 
-    LogInfo("Received: " + strSentence); // Log the full received sentence for debugging purposes
+    LogInfoD("Received: " + strSentence); // Log the full received sentence for debugging purposes
 
     // Call the sentence callback if set
     if (NULL != m_pSentenceCallBack)
@@ -268,20 +337,17 @@ bool GPS::processSentence(std::string strSentence)
         if (!vElems[9].empty())
         {
             double dMeters = std::stod(vElems[9].c_str());
-            std::stringstream oss;
-            if (dMeters < 1000.0)
-            {
-                oss << std::fixed << std::setfill(' ') << std::setprecision(1) << dMeters << "m";
-            }
-            else
-            {
-                oss << std::setfill(' ') << std::setprecision(0) << dMeters << "m";
-            }
-            m_spGPSData->strAltitude = oss.str();
+#if defined(OBSCURE_LOCATION)
+            dMeters = 1064.0;
+#endif
+            double dFeet = dMeters * 3.28084;
+            m_spGPSData->strAltitude = formatDouble(dMeters, " m");
+            m_spGPSData->strAltitudeFeet = formatDouble(dFeet, " f");
         }
         else
         {
             m_spGPSData->strAltitude = "";
+            m_spGPSData->strAltitudeFeet = "";
         }
         break;
     }
@@ -377,23 +443,22 @@ bool GPS::processSentence(std::string strSentence)
             if (!vElems[3].empty() && !vElems[4].empty() && !vElems[5].empty() && !vElems[6].empty())
             {
                 m_spGPSData->bHasPosition = true;
-                m_spGPSData->strLatitude = convertToDegrees(vElems[3], 7) + vElems[4];
-                m_spGPSData->strLongitude = convertToDegrees(vElems[5], 8) + vElems[6];
+                m_spGPSData->strLatitude = convertToDegrees(vElems[3], 7) + " " + vElems[4];
+                m_spGPSData->strLongitude = convertToDegrees(vElems[5], 8) + " " + vElems[6];
+#if defined(OBSCURE_LOCATION)
+                m_spGPSData->strLatitude = "42.6373 N";
+                m_spGPSData->strLongitude = "73.1659 W";
+#endif
             }
             if (!vElems[7].empty())
             {
                 double dKnots = std::stod(vElems[7].c_str());
                 double dMph = dKnots * 1.15078;
-                std::stringstream oss;
-                if (dMph < 10.0)
-                {
-                    oss << std::fixed << std::setfill(' ') << std::setprecision(1) << dMph << "mph";
-                }
-                else
-                {
-                    oss << std::setfill(' ') << std::setprecision(0) << dMph << "mph";
-                }
-                m_spGPSData->strSpeed = oss.str();
+                double dKph = dKnots * 1.852;
+                m_spGPSData->strSpeed = formatDouble(dMph, " mph");
+                m_spGPSData->strSpeedKts = formatDouble(dKnots, " kts");
+                m_spGPSData->strSpeedKph = formatDouble(dKph, " kph");
+                m_spGPSData->strSpeedMph = formatDouble(dMph, " mph");
             }
         }
         else
