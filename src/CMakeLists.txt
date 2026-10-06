@@ -3,6 +3,7 @@
 #
 
 target_sources(gps_tft PUBLIC
+    button.cpp
     font/font_factory.cpp
     framebuf.cpp
     gps_tft.cpp
@@ -10,6 +11,8 @@ target_sources(gps_tft PUBLIC
     gps_uart.cpp
     ili_tft.cpp
     led.cpp
+    log.cpp
     main.cpp
+    timers.cpp
     timemgr.cpp
 )

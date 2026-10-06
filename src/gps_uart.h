@@ -16,7 +16,7 @@
 #include "hardware/uart.h"
 #include "pico/util/queue.h"
 
-#include "timemgr.h"
+#include "timers.h"
 
 auto constexpr GPS_BUFSIZE = 96;      // Max NMEA-0183 sentence length is actually 82 characters
 auto constexpr GPS_QUEUE_SIZE = 16;   // Number of sentences to queue
@@ -43,7 +43,7 @@ private:
     virtual bool getSentence(std::string& strSentence) override;
 
     // Send commands to report external antenna status.
-#if defined(SEND_ANTENNA_STATUS_REQUESTS)
+#if defined(ANTENNA_STATUS_REQUEST_REPEAT_SECONDS)
     void sendExternalAntennaStatusRequest();
 #endif
 
@@ -65,7 +65,7 @@ private:
     uart_parity_t m_parity_out {UART_PARITY_NONE};
     uint m_baudrate_out {0};
 
-#if defined(SEND_ANTENNA_STATUS_REQUESTS)
+#if defined(ANTENNA_STATUS_REQUEST_REPEAT_SECONDS)
     DelayedRepeatingTimer::Shared m_spSendAntennaStatusTimer;
     bool m_bSendExternalAntennaStatusRequest {false};
 #endif

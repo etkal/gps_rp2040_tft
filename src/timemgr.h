@@ -1,7 +1,7 @@
 /*
  * Time manager for wall-clock validity and time-zone offset state.
  *
- * (c) 2026 Erik Tkal
+ * Copyright (c) 2026 Erik Tkal
  *
  */
 
@@ -28,6 +28,14 @@ class TimeMgr
 public:
     typedef std::shared_ptr<TimeMgr> Shared;
 
+    // Identifies which source last successfully set the wall clock.
+    enum class TimeSource
+    {
+        Unknown,
+        Gps,
+        Ntp,
+    };
+
     static Shared GetInstance();
     static void InitializeSingleton(std::string timeZoneName = "UTC");
 
@@ -37,10 +45,15 @@ public:
     static bool IsGpsTimeDateWithinOneSecond(const std::string& gpsTime, const std::string& gpsDate);
     static std::string FormatCurrentTimestamp();
     static std::string FormatCurrentTimeHMS();
-    static void LogInfo(const std::string& message);
+    static std::string FormatCurrentTimeUTC();
+    static std::string FormatCurrentDate();
+    static std::string FormatCurrentDateUTC();
 
     static bool SetTimeFromNtp(uint32_t timeoutMs = 10000);
+    static void EnableNtpAutoRetry(uint32_t retryIntervalMs = 60000, uint32_t timeoutMs = 10000);
+    static bool AttemptNtpTimeSync();
     static bool SetTimeFromGps(const std::string& gpsTime, const std::string& gpsDate);
+    static TimeSource GetTimeSource();
     static bool RefreshTimeZoneOffset(std::time_t whenUtc = 0);
     static bool IsValid();
     static bool HasTimeZoneOffset();
@@ -53,7 +66,10 @@ private:
     explicit TimeMgr(std::string timeZoneName = "UTC");
 
     bool setTimeFromNtp(uint32_t timeoutMs = 10000);
+    void enableNtpAutoRetry(uint32_t retryIntervalMs, uint32_t timeoutMs);
+    bool attemptNtpTimeSync();
     bool setTimeFromGps(const std::string& gpsTime, const std::string& gpsDate);
+    TimeSource getTimeSource() const;
     bool refreshTimeZoneOffset(std::time_t whenUtc = 0);
     bool isValid() const;
     bool hasTimeZoneOffset() const;
@@ -61,75 +77,22 @@ private:
     bool isDst() const;
     const std::string& timeZoneName() const;
     void setTimeZoneName(std::string timeZoneName);
+    std::string formatCurrentTimeHMS() const;
+    std::string formatCurrentTimeUTC() const;
+    std::string formatCurrentDate() const;
+    std::string formatCurrentDateUTC() const;
 
     static Shared sm_spTimeMgr;
 
     std::string m_timeZoneName;
+    std::string m_timeZoneAbbrev;
     float m_timeZoneOffsetHours;
-    bool m_isDst;
-    bool m_hasTimeZoneOffset;
-};
+    bool m_bIsDst;
+    bool m_bHasTimeZoneOffset;
 
-// Helper function to log messages with TimeMgr context
-inline void LogInfo(const std::string& message)
-{
-    TimeMgr::LogInfo(message);
-}
-
-// DelayedRepeatingTimer is a utility class that provides a mechanism to execute a callback
-// function after a specified delay and then repeatedly at a specified interval.
-// It is useful for scheduling periodic tasks in applications. The timer can be started and
-// stopped, and it provides a method to check if it is currently running.
-//
-class DelayedRepeatingTimer
-{
-public:
-    typedef std::shared_ptr<DelayedRepeatingTimer> Shared;
-
-    DelayedRepeatingTimer(uint32_t delayMs, uint32_t intervalMs, std::function<void()> callback, alarm_pool_t* pAlarmPool = nullptr);
-    ~DelayedRepeatingTimer();
-
-    void Start();
-    void Stop();
-    bool IsRunning() const;
-
-private:
-    static int64_t delayAlarmCallback(alarm_id_t alarmId, void* pUserData);
-    static bool repeatingTimerCallback(repeating_timer* pRepeatingTimer);
-
-    int64_t onDelayAlarm(alarm_id_t alarmId);
-    bool onRepeatingTick();
-
-    uint32_t m_delayMs;
-    uint32_t m_intervalMs;
-    std::function<void()> m_callback;
-    alarm_pool_t* m_pAlarmPool;
-    alarm_id_t m_delayAlarmId;
-    repeating_timer m_repeatingTimer;
-    bool m_repeatingActive;
-    bool m_running;
-};
-
-// AlarmTimer is a utility class that executes a callback once at a specific future time.
-class AlarmTimer
-{
-public:
-    typedef std::shared_ptr<AlarmTimer> Shared;
-
-    explicit AlarmTimer(std::function<void()> callback, alarm_pool_t* pAlarmPool = nullptr);
-    ~AlarmTimer();
-
-    void Start(uint32_t delayMs);
-    void Stop();
-    bool IsRunning() const;
-
-private:
-    static int64_t alarmCallback(alarm_id_t alarmId, void* pUserData);
-
-    int64_t onAlarm(alarm_id_t alarmId);
-
-    std::function<void()> m_callback;
-    alarm_pool_t* m_pAlarmPool;
-    alarm_id_t m_alarmId;
-    bool m_running;
+    bool m_bNtpAutoRetryEnabled;
+    uint32_t m_ntpRetryIntervalMs;
+    uint32_t m_ntpTimeoutMs;
+    absolute_time_t m_nextNtpAttemptTime;
+    TimeSource m_timeSource {TimeSource::Unknown};
 };
