@@ -32,10 +32,8 @@
 #include "gps_uart.h"
 #include "gps_tft.h"
 #include "timemgr.h"
+#include "powermgr.h"
 #include "log.h"
-#if !defined(NDEBUG)
-#include "font_factory.h"
-#endif
 
 #if defined(GPS_ON_CORE_1) && defined(DISPLAY_ON_CORE_1)
 #error "GPS_ON_CORE_1 and DISPLAY_ON_CORE_1 cannot both be defined"
@@ -104,10 +102,6 @@
 #error unknown board
 #endif
 
-#if !defined(DISPLAY_SPI_SPEED)
-#define DISPLAY_SPI_SPEED 20000000 // 20MHz
-#endif
-
 // #define USE_WS2812_PIN 16 // Override
 // #define USE_LED_PIN 16    // Override
 
@@ -168,6 +162,16 @@ int main()
 #endif
 
     TimeMgr::InitializeSingleton(TIME_ZONE);
+
+#if defined(DISPLAY_VSYS_VOLTAGE)
+#if defined(ADC_GPIO_PIN)
+    PowerMgr::InitializeSingleton(ADC_GPIO_PIN); // Initialize the power manager with the specified ADC GPIO pin
+#elif defined(PICO_VSYS_PIN)
+    PowerMgr::InitializeSingleton(PICO_VSYS_PIN); // Initialize the power manager with the VSYS pin
+#endif
+#endif // DISPLAY_VSYS_VOLTAGE
+    auto spPowerMgr = PowerMgr::GetInstance();
+
     LogInfo("Starting GPS TFT application...");
 
 #if defined(SEEED_XIAO_RP2040)
@@ -253,7 +257,7 @@ int main()
 
         spGPS->DoWork(); // Process the GPS
 
-        spDevice->DoWork(); // Process the GPS_OLED and display
+        spDevice->DoWork(); // Process the GPS_TFT and display (noop if it is autonomous on core 1)
 
         // Check if the device has received new data, limits the frequency of time synchronization attempts, etc.
         if (spDevice->GetStatus(deviceStatus))
@@ -278,39 +282,56 @@ int main()
             }
         }
 
-        // Blink the LED here based on the device status.
-        if (spLED)
+        // Perform actions you want to occur once per second
+        uint64_t nowSecond = TimeMgr::CurrentEpochSeconds();
+        if (nowSecond != prevNowSecond)
         {
-            uint64_t nowSecond = TimeMgr::CurrentEpochSeconds();
-            if (nowSecond != prevNowSecond)
-            {
-                prevNowSecond = nowSecond;
+            prevNowSecond = nowSecond;
 
-                if (deviceStatus.strGpsTimeRaw.empty())
+            // Set or blink the LED here based on the device status.
+            if (spLED)
+            {
+                uint64_t nowSecond = TimeMgr::CurrentEpochSeconds();
+                if (nowSecond != prevNowSecond)
                 {
-                    spLED->SetPixel(0, led_red);
-                    spLED->Blink_ms(0, 500);
-                }
-                else
-                {
-                    if (deviceStatus.bHasPosition)
+                    prevNowSecond = nowSecond;
+
+                    if (deviceStatus.strGpsTimeRaw.empty())
                     {
-                        spLED->SetPixel(0, deviceStatus.bExternalAntenna ? led_blue : led_green);
+                        spLED->SetPixel(0, led_red);
+                        spLED->Blink_ms(0, 500);
                     }
                     else
                     {
-                        spLED->SetPixel(0, deviceStatus.bExternalAntenna ? led_magenta : led_red);
+                        if (deviceStatus.bHasPosition)
+                        {
+                            spLED->SetPixel(0, deviceStatus.bExternalAntenna ? led_blue : led_green);
+                        }
+                        else
+                        {
+                            spLED->SetPixel(0, deviceStatus.bExternalAntenna ? led_magenta : led_red);
+                        }
+                        spLED->Blink_ms(0, 50);
                     }
-                    spLED->Blink_ms(0, 50);
                 }
+            }
+
+            // If configured, check the power source voltage and status.
+            if (spPowerMgr)
+            {
+                auto fVoltage = spPowerMgr->GetVoltage(true);
+                auto bUsingBattery = spPowerMgr->UsingBattery();
+
+                if (0.0f != fVoltage)
+                {
+                    LogInfoD("Battery Voltage: " + std::to_string(fVoltage) + "  Using Battery: " + std::to_string(bUsingBattery));
+                }
+            }
 
 #if !defined(NDEBUG)
-                LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));
+            LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));
 #endif
-            }
         }
-
-        tight_loop_contents();
     }
 
 #if defined(PLATFORM_PICO_W)
