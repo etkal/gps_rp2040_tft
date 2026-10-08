@@ -53,6 +53,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "hardware/gpio.h"
 
+#if !defined(DISPLAY_SPI_SPEED)
+#define DISPLAY_SPI_SPEED 20000000 // 20MHz default, override in CMakeLists.txt
+#endif
+
 #ifndef pgm_read_byte
 #define pgm_read_byte(addr) (*(const uint8_t*)(addr))
 #endif

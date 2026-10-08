@@ -102,10 +102,6 @@
 #error unknown board
 #endif
 
-#if !defined(DISPLAY_SPI_SPEED)
-#define DISPLAY_SPI_SPEED 20000000 // 20MHz
-#endif
-
 // #define USE_WS2812_PIN 16 // Override
 // #define USE_LED_PIN 16    // Override
 

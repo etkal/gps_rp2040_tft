@@ -23,7 +23,7 @@ set(PICO_BOARD pico_w)
 #set(PICO_BOARD seeed_xiao_rp2040)
 
 # Enable the following to use the debugprobe for debugging
-set(PICO_DEBUGPROBE 1)
+#set(PICO_DEBUGPROBE 1)
 
 # Some LED modules use RGB ordering for the WS2812 LEDs
 #add_compile_definitions(WS2812_LED_IS_RGB)
@@ -37,17 +37,18 @@ add_compile_definitions(DISPLAY_ON_CORE_1)
 
 # TFT display type - enable one of the following
 #
-#add_compile_definitions(DISPLAY_ILI934X)
-add_compile_definitions(DISPLAY_ILI948X)
+add_compile_definitions(DISPLAY_ILI934X)
+#add_compile_definitions(DISPLAY_ILI948X)
 #add_compile_definitions(DISPLAY_ST7796)
 
 # SPI device speed for the display. They seem to be able to handle 40MHz, but some boards may not be
 # able to handle that speed. If you have issues, try 20MHz or 10MHz.
-add_compile_definitions(DISPLAY_SPI_SPEED=40000000)
+#
+#add_compile_definitions(DISPLAY_SPI_SPEED=40000000)
 
 # Set the following if using Waveshare Pico-ResTouch-LCD for GPIO assignments.
 #
-add_compile_definitions(DISPLAY_PICO_RESTOUCH)
+#add_compile_definitions(DISPLAY_PICO_RESTOUCH)
 
 # ILI9341, ILI948X and ST7796 can all use 18-bit pixels (RGB666), but the default is 16-bit (RGB565).
 #
