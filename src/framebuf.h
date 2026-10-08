@@ -80,49 +80,62 @@ public:
     ~Framebuf();
     void Initialize(uint16_t nWidth, uint16_t nHeight, ePixelFormat eFormat, bool bRevBytes = false, uint16_t nStride = 0);
 
-    void setpixel(int x, int y, uint16_t color);
-    uint16_t getpixel(int x, int y);
-    void fillrect(int x, int y, int w, int h, uint16_t color);
-
-    void fill(uint16_t color);
-    void hline(int x, int y, int w, uint16_t color);
-    void vline(int x, int y, int h, uint16_t color);
-    void rect(int x, int y, int w, int h, uint16_t color, bool bFill = false);
-    void line(int x1, int y1, int x2, int y2, uint16_t color);
-    void ellipse(int cx, int cy, int xradius, int yradius, uint16_t color, bool bFill = false, uint8_t mask = ELLIPSE_MASK_ALL);
-    void text(const char* str, int x, int y, uint16_t color);
+    void SetPixel(int x, int y, uint16_t color);
+    uint16_t GetPixel(int x, int y);
+    void FillRect(int x, int y, int w, int h, uint16_t color);
+    void Fill(uint16_t color);
+    void HLine(int x, int y, int w, uint16_t color);
+    void VLine(int x, int y, int h, uint16_t color);
+    void Rect(int x, int y, int w, int h, uint16_t color, bool bFill = false);
+    void Line(int x1, int y1, int x2, int y2, uint16_t color);
+    void Ellipse(int cx, int cy, int xradius, int yradius, uint16_t color, bool bFill = false, uint8_t mask = ELLIPSE_MASK_ALL);
+    void Text(const char* str, int x, int y, uint16_t color);
     // Draw text with integer scaling factor (1 = normal size)
-    void text(const char* str, int x, int y, uint16_t color, int scale);
+    void Text(const char* str, int x, int y, uint16_t color, int scale);
     // Draw text using a bitmap font
-    void text(const char* str, int x, int y, uint16_t color, const BitmapFont& font, int scale = 1);
+    void Text(const char* str, int x, int y, uint16_t color, const BitmapFont& font, int scale = 1);
 
     // Set the default font for text() calls (nullptr to use hardcoded font_petme128_8x8)
-    void SetFont(const BitmapFont* pFont)
+    inline void SetFont(const BitmapFont* pFont)
     {
         m_pFont = pFont;
     }
-    const BitmapFont* GetFont() const
+    inline const BitmapFont* GetFont() const
     {
         return m_pFont;
     }
-    void ClearFont()
+    inline void ClearFont()
     {
         m_pFont = nullptr;
     }
 
-    void* buffer()
+protected:
+    inline void SetOffset(uint16_t xoff, uint16_t yoff)
+    {
+        m_xoff = xoff;
+        m_yoff = yoff;
+    }
+    inline uint16_t GetXOffset()
+    {
+        return m_xoff;
+    }
+    inline uint16_t GetYOffset()
+    {
+        return m_yoff;
+    }
+    inline void* buffer()
     {
         return m_pBuf;
     }
-    uint16_t width()
+    inline uint16_t width()
     {
         return m_nWidth;
     }
-    uint16_t height()
+    inline uint16_t height()
     {
         return m_nHeight;
     }
-    uint16_t pixelSize()
+    inline uint16_t pixelSize()
     {
         return m_nPixelSize;
     }
@@ -131,6 +144,16 @@ private:
     bool check(int& x, int& y);
     bool check(int& x, int& y, int& h, int& w);
 
+    // The following methods should only ever call the private method versions so as to
+    // only adjust for the offsets once per external call.
+    void setPixel(int x, int y, uint16_t color);
+    uint16_t getPixel(int x, int y);
+    void fillRect(int x, int y, int w, int h, uint16_t color);
+    void text(const char* str, int x, int y, uint16_t color);
+    // Draw text with integer scaling factor (1 = normal size)
+    void text(const char* str, int x, int y, uint16_t color, int scale);
+    // Draw text using a bitmap font
+    void text(const char* str, int x, int y, uint16_t color, const BitmapFont& font, int scale = 1);
     void ellipse_points(int cx, int cy, int x, int y, uint16_t color, uint8_t mask);
     void setpixel_masked(int x, int y, uint16_t color, uint8_t mask);
 
@@ -140,13 +163,20 @@ private:
     {
         return m_bRevBytes ? __builtin_bswap16(color) : color;
     }
+    inline void adjustPoint(int& x, int& y)
+    {
+        x -= m_xoff;
+        y -= m_yoff;
+    }
 
-    void* m_pBuf;
-    uint16_t m_nPixelSize;
-    uint16_t m_nWidth;
-    uint16_t m_nHeight;
-    uint16_t m_nStride;
-    ePixelFormat m_eFormat;
-    bool m_bRevBytes;
-    const BitmapFont* m_pFont;
+    void* m_pBuf {};
+    uint16_t m_xoff {};
+    uint16_t m_yoff {};
+    uint16_t m_nPixelSize {};
+    uint16_t m_nWidth {};
+    uint16_t m_nHeight {};
+    uint16_t m_nStride {};
+    ePixelFormat m_eFormat {};
+    bool m_bRevBytes {};
+    const BitmapFont* m_pFont {};
 };

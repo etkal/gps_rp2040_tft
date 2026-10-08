@@ -121,13 +121,17 @@ void Framebuf::Initialize(uint16_t nWidth, uint16_t nHeight, ePixelFormat eForma
     }
 }
 
-void Framebuf::setpixel(int x, int y, uint16_t color)
+void Framebuf::SetPixel(int x, int y, uint16_t color)
+{
+    adjustPoint(x, y);
+    setPixel(x, y, color);
+}
+void Framebuf::setPixel(int x, int y, uint16_t color)
 {
     if (!check(x, y) || nullptr == m_pBuf)
     {
         return;
     }
-
     switch (m_eFormat)
     {
     case MVLSB:
@@ -153,7 +157,12 @@ void Framebuf::setpixel(int x, int y, uint16_t color)
     }
 }
 
-uint16_t Framebuf::getpixel(int x, int y)
+uint16_t Framebuf::GetPixel(int x, int y)
+{
+    adjustPoint(x, y);
+    return getPixel(x, y);
+}
+uint16_t Framebuf::getPixel(int x, int y)
 {
     if (!check(x, y) || nullptr == m_pBuf)
     {
@@ -176,7 +185,12 @@ uint16_t Framebuf::getpixel(int x, int y)
     }
 }
 
-void Framebuf::fillrect(int x, int y, int w, int h, uint16_t color)
+void Framebuf::FillRect(int x, int y, int w, int h, uint16_t color)
+{
+    adjustPoint(x, y);
+    fillRect(x, y, w, h, color);
+}
+void Framebuf::fillRect(int x, int y, int w, int h, uint16_t color)
 {
     if (!check(x, y, w, h) || nullptr == m_pBuf)
     {
@@ -228,38 +242,43 @@ void Framebuf::fillrect(int x, int y, int w, int h, uint16_t color)
     }
 }
 
-void Framebuf::fill(uint16_t color)
+void Framebuf::Fill(uint16_t color)
 {
-    fillrect(0, 0, m_nWidth, m_nHeight, color);
+    fillRect(0, 0, m_nWidth, m_nHeight, color);
 }
 
-void Framebuf::hline(int x, int y, int w, uint16_t color)
+void Framebuf::HLine(int x, int y, int w, uint16_t color)
 {
-    fillrect(x, y, w, 1, color);
+    adjustPoint(x, y);
+    fillRect(x, y, w, 1, color);
 }
 
-void Framebuf::vline(int x, int y, int h, uint16_t color)
+void Framebuf::VLine(int x, int y, int h, uint16_t color)
 {
-    fillrect(x, y, 1, h, color);
+    adjustPoint(x, y);
+    fillRect(x, y, 1, h, color);
 }
 
-void Framebuf::rect(int x, int y, int w, int h, uint16_t color, bool bFill)
+void Framebuf::Rect(int x, int y, int w, int h, uint16_t color, bool bFill)
 {
+    adjustPoint(x, y);
     if (bFill)
     {
-        fillrect(x, y, w, h, color);
+        fillRect(x, y, w, h, color);
     }
     else
     {
-        fillrect(x, y, w, 1, color);
-        fillrect(x, y + h - 1, w, 1, color);
-        fillrect(x, y, 1, h, color);
-        fillrect(x + w - 1, y, 1, h, color);
+        fillRect(x, y, w, 1, color);
+        fillRect(x, y + h - 1, w, 1, color);
+        fillRect(x, y, 1, h, color);
+        fillRect(x + w - 1, y, 1, h, color);
     }
 }
 
-void Framebuf::line(int x1, int y1, int x2, int y2, uint16_t color)
+void Framebuf::Line(int x1, int y1, int x2, int y2, uint16_t color)
 {
+    adjustPoint(x1, y1);
+    adjustPoint(x2, y2);
     int dx = x2 - x1;
     int sx;
     if (dx > 0)
@@ -311,14 +330,14 @@ void Framebuf::line(int x1, int y1, int x2, int y2, uint16_t color)
         {
             if (0 <= y1 && y1 < m_nWidth && 0 <= x1 && x1 < m_nHeight)
             {
-                setpixel(y1, x1, color);
+                setPixel(y1, x1, color);
             }
         }
         else
         {
             if (0 <= x1 && x1 < m_nWidth && 0 <= y1 && y1 < m_nHeight)
             {
-                setpixel(x1, y1, color);
+                setPixel(x1, y1, color);
             }
         }
         while (e >= 0)
@@ -330,11 +349,12 @@ void Framebuf::line(int x1, int y1, int x2, int y2, uint16_t color)
         e += 2 * dy;
     }
 
-    setpixel(x2, y2, color);
+    setPixel(x2, y2, color);
 }
 
-void Framebuf::ellipse(int cx, int cy, int xradius, int yradius, uint16_t color, bool bFill, uint8_t mask)
+void Framebuf::Ellipse(int cx, int cy, int xradius, int yradius, uint16_t color, bool bFill, uint8_t mask)
 {
+    adjustPoint(cx, cy);
     if (bFill)
     {
         mask |= ELLIPSE_MASK_FILL;
@@ -389,6 +409,11 @@ void Framebuf::ellipse(int cx, int cy, int xradius, int yradius, uint16_t color,
     return;
 }
 
+void Framebuf::Text(const char* str, int x, int y, uint16_t color)
+{
+    adjustPoint(x, y);
+    text(str, x, y, color);
+}
 void Framebuf::text(const char* str, int x, int y, uint16_t color)
 {
     // If a default font is set, use it
@@ -420,7 +445,7 @@ void Framebuf::text(const char* str, int x, int y, uint16_t color)
                     {
                         if (0 <= y1 && y1 < m_nHeight) // clip y
                         {
-                            setpixel(x, y1, color);
+                            setPixel(x, y1, color);
                         }
                     }
                 }
@@ -429,6 +454,11 @@ void Framebuf::text(const char* str, int x, int y, uint16_t color)
     }
 }
 
+void Framebuf::Text(const char* str, int x, int y, uint16_t color, int scale)
+{
+    adjustPoint(x, y);
+    text(str, x, y, color, *m_pFont, scale);
+}
 void Framebuf::text(const char* str, int x, int y, uint16_t color, int scale)
 {
     if (scale <= 1)
@@ -471,7 +501,7 @@ void Framebuf::text(const char* str, int x, int y, uint16_t color, int scale)
                                 int py = ybase + sy;
                                 if (0 <= px && px < m_nWidth && 0 <= py && py < m_nHeight)
                                 {
-                                    setpixel(px, py, color);
+                                    setPixel(px, py, color);
                                 }
                             }
                         }
@@ -483,6 +513,11 @@ void Framebuf::text(const char* str, int x, int y, uint16_t color, int scale)
     }
 }
 
+void Framebuf::Text(const char* str, int x, int y, uint16_t color, const BitmapFont& font, int scale)
+{
+    adjustPoint(x, y);
+    text(str, x, y, color, font, scale);
+}
 void Framebuf::text(const char* str, int x, int y, uint16_t color, const BitmapFont& font, int scale)
 {
     if (scale < 1)
@@ -529,7 +564,7 @@ void Framebuf::text(const char* str, int x, int y, uint16_t color, const BitmapF
                                 int py = ybase + sy;
                                 if (0 <= px && px < (int)m_nWidth && 0 <= py && py < (int)m_nHeight)
                                 {
-                                    setpixel(px, py, color);
+                                    setPixel(px, py, color);
                                 }
                             }
                         }
@@ -570,7 +605,7 @@ void Framebuf::text(const char* str, int x, int y, uint16_t color, const BitmapF
                                 int py = ybase + sy;
                                 if (0 <= px && px < (int)m_nWidth && 0 <= py && py < (int)m_nHeight)
                                 {
-                                    setpixel(px, py, color);
+                                    setPixel(px, py, color);
                                 }
                             }
                         }
@@ -611,19 +646,19 @@ void Framebuf::ellipse_points(int cx, int cy, int x, int y, uint16_t color, uint
     {
         if (mask & ELLIPSE_MASK_Q1)
         {
-            fillrect(cx, cy - y, x + 1, 1, color);
+            fillRect(cx, cy - y, x + 1, 1, color);
         }
         if (mask & ELLIPSE_MASK_Q2)
         {
-            fillrect(cx - x, cy - y, x + 1, 1, color);
+            fillRect(cx - x, cy - y, x + 1, 1, color);
         }
         if (mask & ELLIPSE_MASK_Q3)
         {
-            fillrect(cx - x, cy + y, x + 1, 1, color);
+            fillRect(cx - x, cy + y, x + 1, 1, color);
         }
         if (mask & ELLIPSE_MASK_Q4)
         {
-            fillrect(cx, cy + y, x + 1, 1, color);
+            fillRect(cx, cy + y, x + 1, 1, color);
         }
     }
     else
@@ -639,7 +674,7 @@ void Framebuf::setpixel_masked(int x, int y, uint16_t color, uint8_t mask)
 {
     if (0 != mask && check(x, y))
     {
-        setpixel(x, y, color);
+        setPixel(x, y, color);
     }
 }
 
@@ -690,7 +725,7 @@ void Framebuf::scroll(int xstep, int ystep)
     {
         for (int x = sx; x != xend; x += dx)
         {
-            setpixel(x, y, getpixel(x - xstep, y - ystep));
+            setPixel(x, y, getPixel(x - xstep, y - ystep));
         }
     }
 }

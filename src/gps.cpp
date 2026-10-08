@@ -55,11 +55,6 @@ static std::map<std::string, eSentenceType> g_SentenceTypeMap = {
     {"$PCD",   kPCD  },
 };
 
-namespace
-{
-    constexpr uint32_t gpsSendDataDelayMs = GPS_SEND_DATA_DELAY_MS;
-} // namespace
-
 static std::string formatDouble(double dValue, std::string strUnit)
 {
     std::ostringstream oss;
@@ -123,19 +118,6 @@ void GPS::Initialize()
         LogInfo("GPS - Using alarm pool for default core");
         m_pAlarmPool = alarm_pool_get_default();
     }
-
-    // Create the timer for sending GPS data to the callback. This is not strictly necessary,
-    // but it allows us to wait for the rest of the sentences to arrive, e.g. GPGSV, before sending
-    // the data to the callback. Without a delay the display will update more quickly with the
-    // time information, but the satellite list may be stale, though that is not critical.
-    m_spSendDataTimer = std::make_shared<AlarmTimer>(
-        [this]() {
-            if (NULL != m_pGpsDataCallback)
-            {
-                (*m_pGpsDataCallback)(m_pGpsDataCtx, m_spGPSData);
-            }
-        },
-        m_pAlarmPool);
 
     // Create the idle timer to detect lack of GPS data. If no data is received for a period of time,
     // we will clear the GPS data object so as to invalidate position information, etc.
@@ -210,17 +192,15 @@ void GPS::DoWork()
         if (m_bSendGpsData)
         {
             m_bSendGpsData = false;
-            m_spSendDataTimer->Start(gpsSendDataDelayMs);
+            if (NULL != m_pGpsDataCallback)
+            {
+                (*m_pGpsDataCallback)(m_pGpsDataCtx, m_spGPSData);
+            }
         }
     }
     else
     {
         m_bInitialized = false;
-        if (m_spSendDataTimer)
-        {
-            m_spSendDataTimer->Stop();
-            m_spSendDataTimer.reset();
-        }
         if (m_spIdleTimer)
         {
             m_spIdleTimer->Stop();

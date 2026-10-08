@@ -13,6 +13,7 @@ target_sources(gps_tft PUBLIC
     led.cpp
     log.cpp
     main.cpp
+    powermgr.cpp
     timers.cpp
     timemgr.cpp
 )

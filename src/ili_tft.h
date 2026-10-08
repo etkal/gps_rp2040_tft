@@ -181,20 +181,6 @@ public:
     void Show();
     void Show(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 
-    void SetPixel(int x, int y, uint16_t color);
-    uint16_t GetPixel(int x, int y);
-    void FillRect(int x, int y, int w, int h, uint16_t color);
-
-    void Fill(uint16_t color);
-    void HLine(int x, int y, int w, uint16_t color);
-    void VLine(int x, int y, int h, uint16_t color);
-    void Rect(int x, int y, int w, int h, uint16_t color, bool bFill = false);
-    void Line(int x1, int y1, int x2, int y2, uint16_t color);
-    void Ellipse(int cx, int cy, int xradius, int yradius, uint16_t color, bool bFill = false, uint8_t mask = ELLIPSE_MASK_ALL);
-    void Text(const char* str, int x, int y, uint16_t color);
-    void Text(const char* str, int x, int y, uint16_t color, int scale);
-    void Text(const char* str, int x, int y, uint16_t color, const BitmapFont& font, int scale = 1);
-
     static inline uint16_t Colour565(uint8_t r, uint8_t g, uint8_t b)
     {
         return (((r >> 3) & 0x1f) << 11) | (((g >> 2) & 0x3f) << 5) | ((b >> 3) & 0x1f);
@@ -234,13 +220,8 @@ public:
     }
 
 protected:
-    void createFramebuf();
+    void initializeFramebuf();
     void setRotation(uint16_t screenWidth, uint16_t screenHeight, ROTATION rotation = R0DEG);
-    void adjustPoint(int& x, int& y)
-    {
-        x -= m_xoff;
-        y -= m_yoff;
-    }
 
     virtual void sendData(uint8_t data) = 0;
 
@@ -287,8 +268,6 @@ protected:
     uint16_t m_nQuadrants;
     std::list<QUADRANT> quadrantList;
     QUADRANT m_eQuadrant;
-    uint16_t m_xoff;
-    uint16_t m_yoff;
 };
 
 // ILI934X-specific TFT class
