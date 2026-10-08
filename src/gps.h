@@ -144,7 +144,6 @@ private:
     SatList m_mSatListIncoming;
     SatList m_mSatListPersistent;
 
-    AlarmTimer::Shared m_spSendDataTimer; // Delay after receiving a specific sentence before sending GPS data
     AlarmTimer::Shared m_spIdleTimer;     // Timer to detect lack of GPS data
     gpsDataCallback m_pGpsDataCallback {nullptr};
     void* m_pGpsDataCtx {nullptr};

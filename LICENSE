@@ -52,7 +52,7 @@ THE SOFTWARE.
 =============================================================================
 
 Some portions of the code are from the Raspberry Pi pico-examples
-project and its use falls under the following copyright:
+project and its use falls under the following copyrights:
 
 Copyright 2020 (c) 2020 Raspberry Pi (Trading) Ltd.
 
@@ -75,6 +75,11 @@ SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PRO
 SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+=== or (ADC example usage) ===
+
+Copyright (c) 2023 Raspberry Pi (Trading) Ltd.
+SPDX-License-Identifier: BSD-3-Clause
 
 =============================================================================
 

@@ -38,6 +38,7 @@
 #include "font_factory.h"
 #include "log.h"
 #include "timemgr.h"
+#include "powermgr.h"
 
 #define SAT_ICON_RADIUS 4
 
@@ -347,6 +348,41 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
     static uint64_t showTime = 0;
 #endif
 
+    // Get battery voltage if available
+    std::string strVoltage;
+    auto spPowerMgr = PowerMgr::GetInstance();
+    if (spPowerMgr)
+    {
+        static std::vector<uint32_t> s_vVoltageSamples;
+        // Integer formatting: float/double via std::to_string yields 0 when run on core 1
+        uint32_t uVoltage_mV = spPowerMgr->GetVoltage_mV();
+        if (uVoltage_mV != 0)
+        {
+            // Use a rolling average of the last 10 voltage samples
+            if (s_vVoltageSamples.size() >= 10)
+            {
+                s_vVoltageSamples.erase(s_vVoltageSamples.begin());
+            }
+            s_vVoltageSamples.push_back(uVoltage_mV);
+            uVoltage_mV = 0; // Reset before summing the samples
+            for (auto v : s_vVoltageSamples)
+            {
+                uVoltage_mV += v;
+            }
+            uVoltage_mV /= s_vVoltageSamples.size();
+
+            auto szUsingBattery = spPowerMgr->UsingBattery() ? "b" : "v";
+            char szVoltage[16];
+            snprintf(szVoltage,
+                     sizeof(szVoltage),
+                     "%s: %lu.%02lu",
+                     szUsingBattery,
+                     (unsigned long)(uVoltage_mV / 1000),
+                     (unsigned long)((uVoltage_mV % 1000) / 10));
+            strVoltage = szVoltage;
+        }
+    }
+
     for (auto nQuadrant : m_spDisplay->GetQuadrants())
     {
         m_spDisplay->SetQuadrant(nQuadrant);
@@ -374,9 +410,12 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
             drawText(2, spGPSData->strAltitude, COLOUR_WHITE, true, X_PAD);
             drawText(4, spGPSData->strSpeed, COLOUR_WHITE, true, X_PAD);
         }
+        // Draw battery voltage if available
+        drawText(5, strVoltage.c_str(), COLOUR_WHITE, true, X_PAD);
+
         if (!spGPSData->strGPSTime.empty())
         {
-            drawText(5, spGPSData->strGPSTime, COLOUR_WHITE, true, X_PAD);
+            drawText(6, spGPSData->strGPSTime, COLOUR_WHITE, true, X_PAD);
         }
 
         // Draw clock

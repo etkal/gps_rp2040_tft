@@ -8,7 +8,7 @@ set(sdkVersion 2.3.0)
 set(toolchainVersion 15_2_Rel1)
 set(picotoolVersion 2.3.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
-if (EXISTS ${picoVscode})
+if(EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
@@ -23,7 +23,7 @@ set(PICO_BOARD pico_w)
 #set(PICO_BOARD seeed_xiao_rp2040)
 
 # Enable the following to use the debugprobe for debugging
-#set(PICO_DEBUGPROBE 1)
+set(PICO_DEBUGPROBE 1)
 
 # Some LED modules use RGB ordering for the WS2812 LEDs
 #add_compile_definitions(WS2812_LED_IS_RGB)
@@ -34,10 +34,6 @@ set(PICO_BOARD pico_w)
 
 # Run the display on the second core. Alternative for the above.
 add_compile_definitions(DISPLAY_ON_CORE_1)
-
-# GPS data callback delay (in milliseconds). On some hardware this is necessary in order to
-# keep the display update from interfering with the received data (even if on another core).
-add_compile_definitions(GPS_SEND_DATA_DELAY_MS=0)
 
 # TFT display type - enable one of the following
 #
@@ -83,6 +79,18 @@ add_compile_definitions(ECHO_TO_UART1)
 # Privacy: obscure the location information in the GPS data
 #add_compile_definitions(OBSCURE_LOCATION)
 
+# Enable display of vsys voltage and power source. Pico has a resistor network built into ADC3 (GPIO29)
+# but you can implement with an external network for other boards. In all cases set ADC_REF_ADJUST to 1.0f
+# and measure the actual voltage to determine the correct adjustment factor (actual/reported). The variance
+# is due to resistor tolerance, as well as the 3.3v reference voltage no being exact. If you are using
+# a battery, you may need to account for the voltage drop across the Schottky diode in order to present
+# a decent approximation of the actual battery voltage, you will need to measure on your device.
+add_compile_definitions(DISPLAY_VSYS_VOLTAGE)
+#add_compile_definitions(ADC_GPIO_PIN=26) # Override if not pico / pico_w
+add_compile_definitions(ADC_REF_ADJUST=1.0f) # ADC reference voltage adjustment ratio
+add_compile_definitions(SCHOTTKY_ADJUST=0.20f) # Schottky diode voltage drop
+add_compile_definitions(PICO_POWER_SAMPLE_COUNT=10) # Number of samples to take for power measurement
+
 # Set pico platform definitions for conditional compilation
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)
     add_compile_definitions(PLATFORM_PICO_W)
@@ -117,8 +125,8 @@ if(PICO_DEBUGPROBE)
     # Set stdout to use UART1 for debugprobe
     add_compile_definitions(gps_oled PRIVATE
         PICO_DEFAULT_UART=1
-        PICO_DEFAULT_UART_TX_PIN=8 # GPIO 8 (Pin 6)
-        PICO_DEFAULT_UART_RX_PIN=9 # GPIO 9k (Pin 7)
+        PICO_DEFAULT_UART_TX_PIN=4
+        PICO_DEFAULT_UART_RX_PIN=5
     )
 endif()
 
@@ -151,6 +159,7 @@ target_link_libraries(gps_tft
     hardware_pio
     hardware_spi
     hardware_dma
+    hardware_adc
     pico_aon_timer
     pico_multicore
 )

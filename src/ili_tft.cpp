@@ -83,9 +83,7 @@ ILI_TFT::ILI_TFT(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint 
       m_rotation(rotation),
       m_madctl(DISPLAY_COLOUR_ORDER),
       m_nQuadrants(DISPLAY_QUADRANTS),
-      m_eQuadrant(FULL_FRAME),
-      m_xoff(0),
-      m_yoff(0)
+      m_eQuadrant(FULL_FRAME)
 {
     switch (DISPLAY_COLOUR_FORMAT)
     {
@@ -144,7 +142,7 @@ void ILI934X::Initialize()
 {
     ILI_TFT::Initialize();
     setRotation(ILI934X_HW_WIDTH, ILI934X_HW_HEIGHT, m_rotation); // Sets width, height and MADCTL value
-    createFramebuf();
+    initializeFramebuf();
 
     // Reset the display
     Reset();
@@ -211,7 +209,7 @@ void ILI948X::Initialize()
 {
     ILI_TFT::Initialize();
     setRotation(ILI948X_HW_WIDTH, ILI948X_HW_HEIGHT, m_rotation); // Sets width, height and MADCTL value
-    createFramebuf();
+    initializeFramebuf();
 
     // Reset the display
     Reset();
@@ -272,7 +270,7 @@ void ST7796::Initialize()
 {
     ILI_TFT::Initialize();
     setRotation(ST7796_HW_WIDTH, ST7796_HW_HEIGHT, m_rotation); // Sets width, height and MADCTL value
-    createFramebuf();
+    initializeFramebuf();
 
     // Reset the display
     Reset();
@@ -335,22 +333,18 @@ void ILI_TFT::SetQuadrant(QUADRANT eQuadrant)
     case LEFT_HALF:
     case UPPER_HALF:
     case UPPER_LEFT:
-        m_xoff = 0;
-        m_yoff = 0;
+        SetOffset(0, 0);
         break;
     case RIGHT_HALF:
     case UPPER_RIGHT:
-        m_xoff = m_dispWidth / 2;
-        m_yoff = 0;
+        SetOffset(m_dispWidth / 2, 0);
         break;
     case LOWER_HALF:
     case LOWER_LEFT:
-        m_xoff = 0;
-        m_yoff = m_dispHeight / 2;
+        SetOffset(0, m_dispHeight / 2);
         break;
     case LOWER_RIGHT:
-        m_xoff = m_dispWidth / 2;
-        m_yoff = m_dispHeight / 2;
+        SetOffset(m_dispWidth / 2, m_dispHeight / 2);
         break;
     }
 }
@@ -406,7 +400,7 @@ void ILI_TFT::setRotation(uint16_t screenWidth, uint16_t screenHeight, ROTATION 
     }
 }
 
-void ILI_TFT::createFramebuf()
+void ILI_TFT::initializeFramebuf()
 {
     ePixelFormat eFormat = DISPLAY_COLOUR_FORMAT;
     switch (m_nQuadrants)
@@ -436,78 +430,6 @@ void ILI_TFT::createFramebuf()
     }
 }
 
-void ILI_TFT::SetPixel(int x, int y, uint16_t color)
-{
-    adjustPoint(x, y);
-    return Framebuf::setpixel(x, y, color);
-}
-
-uint16_t ILI_TFT::GetPixel(int x, int y)
-{
-    adjustPoint(x, y);
-    return Framebuf::getpixel(x, y);
-}
-
-void ILI_TFT::FillRect(int x, int y, int w, int h, uint16_t color)
-{
-    adjustPoint(x, y);
-    return Framebuf::fillrect(x, y, w, h, color);
-}
-
-void ILI_TFT::Fill(uint16_t color)
-{
-    return Framebuf::fill(color);
-}
-
-void ILI_TFT::HLine(int x, int y, int w, uint16_t color)
-{
-    adjustPoint(x, y);
-    return Framebuf::hline(x, y, w, color);
-}
-
-void ILI_TFT::VLine(int x, int y, int h, uint16_t color)
-{
-    adjustPoint(x, y);
-    return Framebuf::vline(x, y, h, color);
-}
-
-void ILI_TFT::Rect(int x, int y, int w, int h, uint16_t color, bool bFill)
-{
-    adjustPoint(x, y);
-    return Framebuf::rect(x, y, w, h, color, bFill);
-}
-
-void ILI_TFT::Line(int x1, int y1, int x2, int y2, uint16_t color)
-{
-    adjustPoint(x1, y1);
-    adjustPoint(x2, y2);
-    return Framebuf::line(x1, y1, x2, y2, color);
-}
-
-void ILI_TFT::Ellipse(int cx, int cy, int xradius, int yradius, uint16_t color, bool bFill, uint8_t mask)
-{
-    adjustPoint(cx, cy);
-    return Framebuf::ellipse(cx, cy, xradius, yradius, color, bFill, mask);
-}
-
-void ILI_TFT::Text(const char* str, int x, int y, uint16_t color)
-{
-    adjustPoint(x, y);
-    return Framebuf::text(str, x, y, color);
-}
-
-void ILI_TFT::Text(const char* str, int x, int y, uint16_t color, int scale)
-{
-    adjustPoint(x, y);
-    return Framebuf::text(str, x, y, color, scale);
-}
-
-void ILI_TFT::Text(const char* str, int x, int y, uint16_t color, const BitmapFont& font, int scale)
-{
-    adjustPoint(x, y);
-    return Framebuf::text(str, x, y, color, font, scale);
-}
-
 void ILI_TFT::Show()
 {
     Show(0, 0, Framebuf::width(), Framebuf::height());
@@ -515,8 +437,8 @@ void ILI_TFT::Show()
 
 void ILI_TFT::Show(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
-    uint16_t disp_x = x + m_xoff;
-    uint16_t disp_y = y + m_yoff;
+    uint16_t disp_x = x + GetXOffset();
+    uint16_t disp_y = y + GetYOffset();
 
     uint16_t _x = MIN(Framebuf::width() - 1, MAX(0, x));
     uint16_t _y = MIN(Framebuf::height() - 1, MAX(0, y));
