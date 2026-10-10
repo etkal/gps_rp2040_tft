@@ -20,7 +20,7 @@
 
 auto constexpr GPS_BUFSIZE = 96;      // Max NMEA-0183 sentence length is actually 82 characters
 auto constexpr GPS_QUEUE_SIZE = 16;   // Number of sentences to queue
-auto constexpr GPS_DMA_BUFSIZE = 256; // Circular DMA buffer size; must be a power of two for ring mode
+auto constexpr GPS_DMA_BUFSIZE = 2048; // Circular DMA buffer size; power of two for ring mode (~2s of data at 9600 baud)
 
 class GPS_UART : public GPS
 {

@@ -291,28 +291,22 @@ int main()
             // Set or blink the LED here based on the device status.
             if (spLED)
             {
-                uint64_t nowSecond = TimeMgr::CurrentEpochSeconds();
-                if (nowSecond != prevNowSecond)
+                if (deviceStatus.strGpsTimeRaw.empty())
                 {
-                    prevNowSecond = nowSecond;
-
-                    if (deviceStatus.strGpsTimeRaw.empty())
+                    spLED->SetPixel(0, led_red);
+                    spLED->Blink_ms(0, 500);
+                }
+                else
+                {
+                    if (deviceStatus.bHasPosition)
                     {
-                        spLED->SetPixel(0, led_red);
-                        spLED->Blink_ms(0, 500);
+                        spLED->SetPixel(0, deviceStatus.bExternalAntenna ? led_blue : led_green);
                     }
                     else
                     {
-                        if (deviceStatus.bHasPosition)
-                        {
-                            spLED->SetPixel(0, deviceStatus.bExternalAntenna ? led_blue : led_green);
-                        }
-                        else
-                        {
-                            spLED->SetPixel(0, deviceStatus.bExternalAntenna ? led_magenta : led_red);
-                        }
-                        spLED->Blink_ms(0, 50);
+                        spLED->SetPixel(0, deviceStatus.bExternalAntenna ? led_magenta : led_red);
                     }
+                    spLED->Blink_ms(0, 50);
                 }
             }
 
