@@ -50,14 +50,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
-#include <list>
 #include <memory>
 
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "hardware/gpio.h"
 
-#include "framebuf.h"
+#include "display.h"
 #include "font.h"
 
 // ILI TFT commands
@@ -137,34 +136,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define ST7796_HW_WIDTH   320
 #define ST7796_HW_HEIGHT  480
 
-enum ROTATION
-{
-    R0DEG,
-    R90DEG,
-    R180DEG,
-    R270DEG,
-    MIRRORED0DEG,
-    MIRRORED90DEG,
-    MIRRORED180DEG,
-    MIRRORED270DEG
-};
-
-enum QUADRANT
-{
-    FULL_FRAME,
-    LEFT_HALF,
-    RIGHT_HALF,
-    UPPER_HALF,
-    LOWER_HALF,
-    UPPER_LEFT,
-    LOWER_LEFT,
-    UPPER_RIGHT,
-    LOWER_RIGHT
-};
 
 // Base ILI TFT class
 //
-class ILI_TFT : public Framebuf
+class ILI_TFT : public Display
 {
 public:
     typedef std::shared_ptr<ILI_TFT> Shared;
@@ -172,44 +147,9 @@ public:
     ILI_TFT(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint dc, uint rst, uint bl, ROTATION rotation = R0DEG);
     virtual ~ILI_TFT() = default;
 
-    virtual void Reset() = 0;
-    virtual void Initialize();
-
-    void Clear(uint16_t colour = COLOUR_BLACK); // Clear entire display via hardware access
-    void SetQuadrant(QUADRANT eQuadrant);
-    std::list<QUADRANT> GetQuadrants();
-    void Show();
-    void Show(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
-
-    static inline uint16_t Colour565(uint8_t r, uint8_t g, uint8_t b)
-    {
-        return (((r >> 3) & 0x1f) << 11) | (((g >> 2) & 0x3f) << 5) | ((b >> 3) & 0x1f);
-    }
-
-    uint16_t Width() const
-    {
-        return m_dispWidth;
-    }
-
-    uint16_t Height() const
-    {
-        return m_dispHeight;
-    }
-
-    bool Landscape() const
-    {
-        return Width() >= Height();
-    }
-    bool Portrait() const
-    {
-        return !Landscape();
-    }
-    uint16_t ShorterSide() const
-    {
-        return (m_dispWidth < m_dispHeight) ? m_dispWidth : m_dispHeight;
-    }
-
-    int get_recommended_font_size() const
+    void Initialize() override;
+    void Show() override;
+    uint RecommendedFontSize() const override
     {
         auto shorterSide = ShorterSide();
         if (shorterSide >= 320)
@@ -219,8 +159,16 @@ public:
         return 12;
     }
 
+    virtual void Reset() = 0;
+
+    void Show(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+
+    static inline uint16_t Colour565(uint8_t r, uint8_t g, uint8_t b)
+    {
+        return (((r >> 3) & 0x1f) << 11) | (((g >> 2) & 0x3f) << 5) | ((b >> 3) & 0x1f);
+    }
+
 protected:
-    void initializeFramebuf();
     void setRotation(uint16_t screenWidth, uint16_t screenHeight, ROTATION rotation = R0DEG);
 
     virtual void sendData(uint8_t data) = 0;
@@ -260,14 +208,9 @@ protected:
     uint m_bl;
 
     // display properties
-    uint16_t m_dispWidth;
-    uint16_t m_dispHeight;
     ROTATION m_rotation;
     uint8_t m_madctl;
     uint8_t m_colmod;
-    uint16_t m_nQuadrants;
-    std::list<QUADRANT> quadrantList;
-    QUADRANT m_eQuadrant;
 };
 
 // ILI934X-specific TFT class

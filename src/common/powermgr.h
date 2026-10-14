@@ -29,6 +29,8 @@ public:
     uint32_t GetVoltage_mV();
     // Using battery or not (might be a guess)
     bool UsingBattery();
+    // Get current status string for display
+    std::string GetStatusString();
 
 private:
     explicit PowerMgr(uint8_t gpioPin);

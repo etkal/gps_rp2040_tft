@@ -29,8 +29,13 @@
 #include "pico/cyw43_arch.h"
 #endif
 
-#include "gps_uart.h"
+// This implementation uses an TFT display and UART-based GPS device
+#include "ili_tft.h"
 #include "gps_tft.h"
+#include "gps_uart.h"
+
+#include "led.h"
+#include "button.h"
 #include "timemgr.h"
 #include "powermgr.h"
 #include "log.h"
@@ -148,10 +153,8 @@ int main()
 
 #if !defined(NDEBUG)
     timer_hw->dbgpause = 0;
-    sleep_ms(5000);
-#else
-    sleep_ms(1000);
 #endif
+    sleep_ms(1000);
 
 #if defined(PLATFORM_PICO_W)
     if (cyw43_arch_init())
@@ -172,7 +175,7 @@ int main()
 #endif // DISPLAY_VSYS_VOLTAGE
     auto spPowerMgr = PowerMgr::GetInstance();
 
-    LogInfo("Starting GPS TFT application...");
+    LogInfo("Starting GPS application...");
 
 #if defined(SEEED_XIAO_RP2040)
     // Clear LED(s) on XIAO (default on)
@@ -240,7 +243,7 @@ int main()
 
     // Start the GPS acquisition, might be local or on core 1
     spGPS->Start();
-    // Start the GPS_TFT device
+    // Start the GPSDisplay device
     spDevice->Start();
 
     uint64_t nLastTimeSyncAttemptSec = std::numeric_limits<uint64_t>::max();
@@ -249,7 +252,6 @@ int main()
 
     while (true)
     {
-        // Set the LED state based on GPS position or other criteria
         if (spLED)
         {
             spLED->DoWork(); // Handle any outstanding work (e.g. turn off blink)
@@ -257,7 +259,7 @@ int main()
 
         spGPS->DoWork(); // Process the GPS
 
-        spDevice->DoWork(); // Process the GPS_TFT and display (noop if it is autonomous on core 1)
+        spDevice->DoWork(); // Process the GPSDisplay (noop if it is autonomous on core 1)
 
         // Check if the device has received new data, limits the frequency of time synchronization attempts, etc.
         if (spDevice->GetStatus(deviceStatus))

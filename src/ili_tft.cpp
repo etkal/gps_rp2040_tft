@@ -74,7 +74,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 ILI_TFT::ILI_TFT(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint dc, uint rst, uint bl, ROTATION rotation)
-    : m_spi(spi),
+    : Display(0, 0), // will adjust later
+      m_spi(spi),
       m_miso(miso),
       m_mosi(mosi),
       m_sck(sck),
@@ -82,12 +83,8 @@ ILI_TFT::ILI_TFT(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint 
       m_dc(dc),
       m_rst(rst),
       m_bl(bl),
-      m_dispWidth(0),
-      m_dispHeight(0),
       m_rotation(rotation),
-      m_madctl(DISPLAY_COLOUR_ORDER),
-      m_nQuadrants(DISPLAY_QUADRANTS),
-      m_eQuadrant(FULL_FRAME)
+      m_madctl(DISPLAY_COLOUR_ORDER)
 {
     switch (DISPLAY_COLOUR_FORMAT)
     {
@@ -99,6 +96,8 @@ ILI_TFT::ILI_TFT(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint 
         m_colmod = 0x55; // 16-bit/pixel
         break;
     }
+    m_nQuadrants = DISPLAY_QUADRANTS;
+    m_eQuadrant = FULL_FRAME;
 }
 
 void ILI_TFT::Initialize()
@@ -146,7 +145,7 @@ void ILI934X::Initialize()
 {
     ILI_TFT::Initialize();
     setRotation(ILI934X_HW_WIDTH, ILI934X_HW_HEIGHT, m_rotation); // Sets width, height and MADCTL value
-    initializeFramebuf();
+    initializeFramebuf(DISPLAY_COLOUR_FORMAT, true);
 
     // Reset the display
     Reset();
@@ -213,7 +212,7 @@ void ILI948X::Initialize()
 {
     ILI_TFT::Initialize();
     setRotation(ILI948X_HW_WIDTH, ILI948X_HW_HEIGHT, m_rotation); // Sets width, height and MADCTL value
-    initializeFramebuf();
+    initializeFramebuf(DISPLAY_COLOUR_FORMAT, true);
 
     // Reset the display
     Reset();
@@ -274,7 +273,7 @@ void ST7796::Initialize()
 {
     ILI_TFT::Initialize();
     setRotation(ST7796_HW_WIDTH, ST7796_HW_HEIGHT, m_rotation); // Sets width, height and MADCTL value
-    initializeFramebuf();
+    initializeFramebuf(DISPLAY_COLOUR_FORMAT, true);
 
     // Reset the display
     Reset();
@@ -318,46 +317,6 @@ void ST7796::sendFramebufferData(uint8_t* data, size_t dataLen)
 }
 #endif // DISPLAY_ST7796
 
-void ILI_TFT::Clear(uint16_t colour)
-{
-    for (auto nQuadrant : GetQuadrants())
-    {
-        SetQuadrant(nQuadrant);
-        Fill(COLOUR_BLACK);
-        Show();
-    }
-}
-
-void ILI_TFT::SetQuadrant(QUADRANT eQuadrant)
-{
-    m_eQuadrant = eQuadrant;
-    switch (m_eQuadrant)
-    {
-    case FULL_FRAME:
-    case LEFT_HALF:
-    case UPPER_HALF:
-    case UPPER_LEFT:
-        SetOffset(0, 0);
-        break;
-    case RIGHT_HALF:
-    case UPPER_RIGHT:
-        SetOffset(m_dispWidth / 2, 0);
-        break;
-    case LOWER_HALF:
-    case LOWER_LEFT:
-        SetOffset(0, m_dispHeight / 2);
-        break;
-    case LOWER_RIGHT:
-        SetOffset(m_dispWidth / 2, m_dispHeight / 2);
-        break;
-    }
-}
-
-std::list<QUADRANT> ILI_TFT::GetQuadrants()
-{
-    return quadrantList;
-}
-
 void ILI_TFT::setRotation(uint16_t screenWidth, uint16_t screenHeight, ROTATION rotation)
 {
     switch (rotation)
@@ -400,36 +359,6 @@ void ILI_TFT::setRotation(uint16_t screenWidth, uint16_t screenHeight, ROTATION 
         m_madctl |= (MADCTL_MY | MADCTL_MV);
         m_dispWidth = screenHeight;
         m_dispHeight = screenWidth;
-        break;
-    }
-}
-
-void ILI_TFT::initializeFramebuf()
-{
-    ePixelFormat eFormat = DISPLAY_COLOUR_FORMAT;
-    switch (m_nQuadrants)
-    {
-    case 1:
-        Framebuf::Initialize(m_dispWidth, m_dispHeight, eFormat, bReverseBytes);
-        quadrantList = {FULL_FRAME};
-        break;
-    case 2:
-        if (m_dispWidth > m_dispHeight)
-        {
-            Framebuf::Initialize(m_dispWidth / 2, m_dispHeight, eFormat, bReverseBytes);
-            quadrantList = {LEFT_HALF, RIGHT_HALF};
-        }
-        else
-        {
-            Framebuf::Initialize(m_dispWidth, m_dispHeight / 2, eFormat, bReverseBytes);
-            quadrantList = {UPPER_HALF, LOWER_HALF};
-        }
-        break;
-    case 4:
-        Framebuf::Initialize(m_dispWidth / 2, m_dispHeight / 2, eFormat, bReverseBytes);
-        quadrantList = {UPPER_LEFT, LOWER_LEFT, UPPER_RIGHT, LOWER_RIGHT};
-        break;
-    default:
         break;
     }
 }
