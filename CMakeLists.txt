@@ -144,7 +144,7 @@ if(PICO_DEBUGPROBE)
     )
 endif()
 
-add_executable(gps_tft)
+add_executable(${PROJECT_NAME})
 pico_enable_stdio_usb(${PROJECT_NAME} 1)
 if(PICO_DEBUGPROBE)
     pico_enable_stdio_uart(${PROJECT_NAME} 1) # for debugprobe
@@ -152,8 +152,8 @@ endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/generated)
 # generate the header file into the source tree as it is included in the RP2040 datasheet
-pico_generate_pio_header(gps_tft
-    ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio
+pico_generate_pio_header(${PROJECT_NAME}
+    ${CMAKE_CURRENT_LIST_DIR}/src/common/ws2812.pio
     OUTPUT_DIR
     ${CMAKE_CURRENT_LIST_DIR}/generated
 )
@@ -164,7 +164,7 @@ add_subdirectory(src/display)
 add_subdirectory(src/font)
 add_subdirectory(src/gps)
 
-target_include_directories(gps_tft PRIVATE
+target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/src
     ${CMAKE_CURRENT_LIST_DIR}/src/common
@@ -173,7 +173,7 @@ target_include_directories(gps_tft PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src/gps
 )
 
-target_link_libraries(gps_tft
+target_link_libraries(${PROJECT_NAME}
     pico_stdlib
     pico_stdio
     hardware_gpio
@@ -186,10 +186,10 @@ target_link_libraries(gps_tft
 )
 
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)
-    target_link_libraries(gps_tft
+    target_link_libraries(${PROJECT_NAME}
         pico_cyw43_arch_none
     )
 endif()
 
 # create map/bin/hex/uf2 file in addition to ELF.
-pico_add_extra_outputs(gps_tft)
+pico_add_extra_outputs(${PROJECT_NAME})

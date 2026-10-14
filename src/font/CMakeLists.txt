@@ -2,6 +2,6 @@
 # Required source files
 #
 
-target_sources(gps_tft PUBLIC
+target_sources(${PROJECT_NAME} PUBLIC
     font_factory.cpp
 )

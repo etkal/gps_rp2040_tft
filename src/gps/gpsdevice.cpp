@@ -83,7 +83,7 @@ void GPSDevice::Initialize()
 void GPSDevice::Start()
 {
 #if defined(DISPLAY_ON_CORE_1)
-    static GPSDevice::Shared sm_spThis = shared_from_this(); // Capture pointer for use in lambda ###ET###???
+    static GPSDevice::Shared sm_spThis = shared_from_this(); // Capture pointer for use in lambda
     // Default core 1 stack is only 4KB; iostream/ostringstream logging overflows it
     static uint32_t sm_core1Stack[16 * 1024 / sizeof(uint32_t)];
     multicore_launch_core1_with_stack(
