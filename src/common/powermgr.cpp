@@ -20,17 +20,19 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
- * 
+ *
  * Original implementation based on Raspberry Pi Pico SDK examples for ADC voltage
  * reading, falls under the following copyright:
- * 
-**
+ *
+ **
  * Copyright (c) 2023 Raspberry Pi (Trading) Ltd.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
 #include "powermgr.h"
+
+#include <vector>
 
 #include "hardware/adc.h"
 
@@ -116,6 +118,42 @@ bool PowerMgr::UsingBattery()
     critical_section_exit(&m_Cs);
     return bUsingBattery;
 }
+
+std::string PowerMgr::GetStatusString()
+{
+    // Get the current status string for display based on a rolling average
+    static std::vector<uint32_t> s_vVoltageSamples;
+    // Integer formatting: float/double via std::to_string yields 0 when run on core 1
+    uint32_t uVoltage_mV = GetVoltage_mV();
+    std::string strVoltage;
+    if (uVoltage_mV != 0)
+    {
+        // Use a rolling average of the last 10 voltage samples
+        if (s_vVoltageSamples.size() >= 10)
+        {
+            s_vVoltageSamples.erase(s_vVoltageSamples.begin());
+        }
+        s_vVoltageSamples.push_back(uVoltage_mV);
+        uVoltage_mV = 0; // Reset before summing the samples
+        for (auto v : s_vVoltageSamples)
+        {
+            uVoltage_mV += v;
+        }
+        uVoltage_mV /= s_vVoltageSamples.size();
+
+        auto szUsingBattery = UsingBattery() ? "b" : "v";
+        char szVoltage[16];
+        snprintf(szVoltage,
+                 sizeof(szVoltage),
+                 "%s: %lu.%02lu",
+                 szUsingBattery,
+                 (unsigned long)(uVoltage_mV / 1000),
+                 (unsigned long)((uVoltage_mV % 1000) / 10));
+        strVoltage = szVoltage;
+    }
+    return strVoltage;
+}
+
 
 int PowerMgr::sample(float* pfVoltage, bool* pbUsingBattery)
 {

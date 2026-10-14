@@ -41,18 +41,18 @@ add_compile_definitions(DISPLAY_ON_CORE_1)
 
 # TFT display type - enable one of the following
 #
-add_compile_definitions(DISPLAY_ILI934X)
-#add_compile_definitions(DISPLAY_ILI948X)
+#add_compile_definitions(DISPLAY_ILI934X)
+add_compile_definitions(DISPLAY_ILI948X)
 #add_compile_definitions(DISPLAY_ST7796)
 
 # SPI device speed for the display. They seem to be able to handle 40MHz, but some boards may not be
 # able to handle that speed. If you have issues, try 20MHz or 10MHz.
 #
-#add_compile_definitions(DISPLAY_SPI_SPEED=40000000)
+add_compile_definitions(DISPLAY_SPI_SPEED=40000000)
 
 # Set the following if using Waveshare Pico-ResTouch-LCD for GPIO assignments.
 #
-#add_compile_definitions(DISPLAY_PICO_RESTOUCH)
+add_compile_definitions(DISPLAY_PICO_RESTOUCH)
 
 # ILI9341, ILI948X and ST7796 can all use 18-bit pixels (RGB666), but the default is 16-bit (RGB565).
 #
@@ -80,7 +80,7 @@ add_compile_definitions(GMT_OFFSET=-4.0)
 # setting to 0 indicates not to repeat, only send once (after a delay), any other value
 # repeats at that interval (in seconds).
 #
-add_compile_definitions(ANTENNA_STATUS_REQUEST_REPEAT_SECONDS=0)
+add_compile_definitions(ANTENNA_STATUS_REQUEST_REPEAT_SECONDS=30)
 
 # Enable echo to UART1
 #
@@ -144,7 +144,7 @@ if(PICO_DEBUGPROBE)
     )
 endif()
 
-add_executable(gps_tft)
+add_executable(${PROJECT_NAME})
 pico_enable_stdio_usb(${PROJECT_NAME} 1)
 if(PICO_DEBUGPROBE)
     pico_enable_stdio_uart(${PROJECT_NAME} 1) # for debugprobe
@@ -152,21 +152,28 @@ endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/generated)
 # generate the header file into the source tree as it is included in the RP2040 datasheet
-pico_generate_pio_header(gps_tft
-    ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio
+pico_generate_pio_header(${PROJECT_NAME}
+    ${CMAKE_CURRENT_LIST_DIR}/src/common/ws2812.pio
     OUTPUT_DIR
     ${CMAKE_CURRENT_LIST_DIR}/generated
 )
 
 add_subdirectory(src)
+add_subdirectory(src/common)
+add_subdirectory(src/display)
+add_subdirectory(src/font)
+add_subdirectory(src/gps)
 
-target_include_directories(gps_tft PRIVATE
+target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/src
+    ${CMAKE_CURRENT_LIST_DIR}/src/common
+    ${CMAKE_CURRENT_LIST_DIR}/src/display
     ${CMAKE_CURRENT_LIST_DIR}/src/font
+    ${CMAKE_CURRENT_LIST_DIR}/src/gps
 )
 
-target_link_libraries(gps_tft
+target_link_libraries(${PROJECT_NAME}
     pico_stdlib
     pico_stdio
     hardware_gpio
@@ -179,10 +186,10 @@ target_link_libraries(gps_tft
 )
 
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)
-    target_link_libraries(gps_tft
+    target_link_libraries(${PROJECT_NAME}
         pico_cyw43_arch_none
     )
 endif()
 
 # create map/bin/hex/uf2 file in addition to ELF.
-pico_add_extra_outputs(gps_tft)
+pico_add_extra_outputs(${PROJECT_NAME})
