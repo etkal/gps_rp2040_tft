@@ -43,7 +43,7 @@ void LogInfo(const std::string& message)
 {
     logInfo(message);
 }
-void LogInfoD(const std::string& message)
+void LogInfoD([[maybe_unused]] const std::string& message)
 {
 #if !defined(NDEBUG)
     logInfo(message);

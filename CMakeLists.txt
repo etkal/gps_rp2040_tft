@@ -126,7 +126,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-add_compile_options(-Wall
+add_compile_options(-Wall -Wextra -Werror
     -Wno-format # int != int32_t as far as the compiler is concerned because gcc has int32_t as long int
     -Wno-unused-function # we have some for the docs that aren't called
     -Wno-maybe-uninitialized
@@ -137,7 +137,7 @@ if(PICO_DEBUGPROBE)
     # set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0 -g3")
     # set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g3")
     # Set stdout to use UART1 for debugprobe
-    add_compile_definitions(gps_oled PRIVATE
+    add_compile_definitions(${PROJECT_NAME} PRIVATE
         PICO_DEFAULT_UART=1
         PICO_DEFAULT_UART_TX_PIN=4
         PICO_DEFAULT_UART_RX_PIN=5
