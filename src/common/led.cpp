@@ -157,7 +157,7 @@ void LED_pico::Show()
     }
 }
 
-void LED_pico::SetPixel(uint idx, uint32_t color, uint8_t brightness)
+void LED_pico::SetPixel(uint idx, uint32_t color, [[maybe_unused]] uint8_t brightness)
 {
     if (idx == 0 || idx == led_all)
     {
@@ -173,7 +173,7 @@ void LED_pico::SetPixel(uint idx, uint32_t color, uint8_t brightness)
     }
 }
 
-uint32_t LED_pico::GetPixel(uint idx)
+uint32_t LED_pico::GetPixel([[maybe_unused]] uint idx)
 {
     return m_nColor;
 }
@@ -265,7 +265,7 @@ void LED_neo::Initialize()
     sleep_us(300);
 }
 
-void LED_neo::On(uint idx)
+void LED_neo::On([[maybe_unused]] uint idx)
 {
     Show();
 }

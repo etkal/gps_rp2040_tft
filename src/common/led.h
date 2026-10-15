@@ -75,7 +75,7 @@ public:
     virtual void Show() = 0;
     virtual void SetPixel(uint idx, uint32_t color, uint8_t brightness = 0) = 0;
     virtual uint32_t GetPixel(uint idx) = 0;
-    virtual void SetIgnore(std::vector<uint32_t> vIgnore) {};
+    virtual void SetIgnore([[maybe_unused]] std::vector<uint32_t> vIgnore) {};
     void Blink_ms(uint idx = 0, uint duration = 50);
     void DoWork();
     static LED::Shared GetLED(uint nLEDIndex = 0);

@@ -22,7 +22,7 @@
  * THE SOFTWARE.
  */
 
-#include "GPSDevice.h"
+#include "gpsdevice.h"
 
 #include <iomanip>
 
