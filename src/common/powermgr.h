@@ -20,7 +20,7 @@ public:
 
     ~PowerMgr() = default;
 
-    static Shared GetInstance();
+    static const Shared& GetInstance();
     static void InitializeSingleton(uint8_t gpioPin);
 
     // ADC voltage in volts

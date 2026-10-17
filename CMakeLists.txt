@@ -90,6 +90,11 @@ add_compile_definitions(ECHO_TO_UART1)
 #
 #add_compile_definitions(OBSCURE_LOCATION)
 
+# Enable wifi and NTP time synchronization
+#
+#set(ENABLE_WIFI 1)
+#add_compile_definitions(TIME_SYNC_USE_NTP=1)
+
 # Enable display of vsys voltage and power source. Pico has a resistor network built into ADC3 (GPIO29)
 # but you can implement with an external network for other boards. In all cases set ADC_REF_ADJUST to 1.0f
 # and measure the actual voltage to determine the correct adjustment factor (actual/reported). The variance
@@ -100,7 +105,7 @@ add_compile_definitions(ECHO_TO_UART1)
 add_compile_definitions(DISPLAY_VSYS_VOLTAGE)
 #add_compile_definitions(ADC_GPIO_PIN=26) # Override if not pico / pico_w
 add_compile_definitions(ADC_REF_ADJUST=1.0f) # ADC reference voltage adjustment ratio
-add_compile_definitions(SCHOTTKY_ADJUST=0.20f) # Schottky diode voltage drop
+add_compile_definitions(SCHOTTKY_ADJUST=0.20f) # Schottky diode voltage drop, if applicable
 add_compile_definitions(PICO_POWER_SAMPLE_COUNT=10) # Number of samples to take for power measurement
 
 # Set pico platform definitions for conditional compilation
@@ -163,6 +168,9 @@ add_subdirectory(src/common)
 add_subdirectory(src/display)
 add_subdirectory(src/font)
 add_subdirectory(src/gps)
+if(ENABLE_WIFI)
+    add_subdirectory(src/wifi)
+endif()
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
@@ -172,6 +180,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src/font
     ${CMAKE_CURRENT_LIST_DIR}/src/gps
 )
+
+if(ENABLE_WIFI)
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/src/wifi
+    )
+endif()
 
 target_link_libraries(${PROJECT_NAME}
     pico_stdlib
@@ -186,9 +200,15 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)
-    target_link_libraries(${PROJECT_NAME}
-        pico_cyw43_arch_none
-    )
+    if(ENABLE_WIFI)
+        target_link_libraries(${PROJECT_NAME}
+            pico_cyw43_arch_lwip_threadsafe_background
+        )
+    else()
+        target_link_libraries(${PROJECT_NAME}
+            pico_cyw43_arch_none
+        )
+    endif()
 endif()
 
 # create map/bin/hex/uf2 file in addition to ELF.
