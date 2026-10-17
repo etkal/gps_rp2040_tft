@@ -562,7 +562,7 @@ namespace
 // Static member declarations
 TimeMgr::Shared TimeMgr::sm_spTimeMgr;
 
-TimeMgr::Shared TimeMgr::GetInstance()
+const TimeMgr::Shared& TimeMgr::GetInstance()
 {
     if (!sm_spTimeMgr)
     {

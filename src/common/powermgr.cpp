@@ -65,7 +65,7 @@ PowerMgr::PowerMgr(uint8_t gpioPin)
 }
 
 
-PowerMgr::Shared PowerMgr::GetInstance()
+const PowerMgr::Shared& PowerMgr::GetInstance()
 {
     return sm_spPowerMgr;
 }

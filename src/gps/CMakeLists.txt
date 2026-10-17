@@ -7,3 +7,9 @@ target_sources(${PROJECT_NAME} PUBLIC
     gps.cpp
     gpsdevice.cpp
 )
+
+if(ENABLE_WIFI)
+    target_sources(${PROJECT_NAME} PUBLIC
+        gps_gpsd.cpp
+    )
+endif()

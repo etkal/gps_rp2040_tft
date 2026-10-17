@@ -36,7 +36,7 @@ public:
         Ntp,
     };
 
-    static Shared GetInstance();
+    static const Shared& GetInstance();
     static void InitializeSingleton(std::string timeZoneName = "UTC");
 
     static bool ResolveTimeZoneOffset(const std::string& timeZoneName, std::time_t whenUtc, float& offsetHours, bool* pIsDst = nullptr);
