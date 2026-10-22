@@ -36,6 +36,7 @@
 
 #include "led.h"
 #include "button.h"
+#include "touch.h"
 #include "timemgr.h"
 #include "powermgr.h"
 #include "log.h"
@@ -74,15 +75,23 @@
 #define PIN_MISO   12
 #define PIN_BL     13
 #define PIN_RST    15
-#elif defined(PLATFORM_PICO)                // Pico, Pico W, Pico 2, Pico 2 W
-#define SPI_DEVICE spi_default              // Default is SPI0 for Pico
-#define PIN_MISO   PICO_DEFAULT_SPI_RX_PIN  // White  16
-#define PIN_CS     PICO_DEFAULT_SPI_CSN_PIN // Org    17
-#define PIN_SCK    PICO_DEFAULT_SPI_SCK_PIN // Purple 18
-#define PIN_MOSI   PICO_DEFAULT_SPI_TX_PIN  // Blue   19
-#define PIN_RST    20                       // Yellow
-#define PIN_DC     21                       // Green
-#define PIN_BL     22                       // Gray
+#define TP_CS      16
+#define TP_IRQ     17
+#elif defined(PLATFORM_PICO)                   // Pico, Pico W, Pico 2, Pico 2 W
+#define SPI_DEVICE    spi_default              // Default is SPI0 for Pico
+#define PIN_MISO      PICO_DEFAULT_SPI_RX_PIN  // White  16
+#define PIN_CS        PICO_DEFAULT_SPI_CSN_PIN // Orange 17
+#define PIN_SCK       PICO_DEFAULT_SPI_SCK_PIN // Purple 18
+#define PIN_MOSI      PICO_DEFAULT_SPI_TX_PIN  // Blue   19
+#define PIN_RST       20                       // Yellow
+#define PIN_DC        21                       // Green
+#define PIN_BL        22                       // Gray
+#define TP_SPI_DEVICE spi1
+#define TP_MISO       12
+#define TP_CS         13
+#define TP_SCK        14
+#define TP_MOSI       15
+#define TP_IRQ        11
 #elif defined(SEEED_XIAO_RP2040)
 // XIAO has spi0 CSn overlap with uart0, so override
 #define SPI_DEVICE spi_default              // Default is SPI0 for XIAO
@@ -153,8 +162,8 @@ int main()
 
 #if !defined(NDEBUG)
     timer_hw->dbgpause = 0;
+    sleep_ms(2000);
 #endif
-    sleep_ms(1000);
 
 #if defined(PLATFORM_PICO_W)
     if (cyw43_arch_init())
@@ -215,8 +224,17 @@ int main()
     spButton->Initialize();
 #endif
 
-    LogInfo("Creating GPS objects...");
+    // Create the touch object, which might share the display SPI bus
+    Touch::Shared spTouch;
+#if defined(TP_CS) && defined(TP_IRQ)
+#if defined(TP_SPI_DEVICE)
+    spTouch = std::make_shared<Touch>(TP_SPI_DEVICE, TP_MISO, TP_MOSI, TP_SCK, TP_CS, TP_IRQ, DISPLAY_ROTATION);
+#else
+    spTouch = std::make_shared<Touch>(SPI_DEVICE, TP_CS, TP_IRQ, DISPLAY_ROTATION);
+#endif
+#endif
 
+    LogInfo("Creating GPS objects...");
     // Create the GPS object
     GPS_UART::Shared spGPS = std::make_shared<GPS_UART>();
     spGPS->SetInputUART(UART0_DEVICE, PIN_UART0_TX, PIN_UART0_RX, DATA_BITS, STOP_BITS, PARITY, UART_BAUD_RATE);
@@ -238,11 +256,13 @@ int main()
 #else
 #error Unsupported display specified
 #endif
-    // Create the GPS_TFT display object
-    GPS_TFT::Shared spDevice = std::make_shared<GPS_TFT>(spDisplay, spGPS, spButton);
 
-    // Start the GPS acquisition, might be local or on core 1
+    // Create the GPS_TFT display object
+    GPS_TFT::Shared spDevice = std::make_shared<GPS_TFT>(spDisplay, spGPS, spButton, spTouch);
+
+    // Start the GPS device, might be local or on core 1, must be started before the display
     spGPS->Start();
+
     // Start the GPSDisplay device
     spDevice->Start();
 

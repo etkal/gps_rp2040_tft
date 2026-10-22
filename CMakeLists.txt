@@ -14,6 +14,8 @@ endif()
 # ====================================================================================
 cmake_minimum_required(VERSION 3.24)
 
+add_compile_definitions(PRODUCT_SPLASH_STRING="ET GPS TFT v1.1")
+
 # Set the board type for pin and LED decisions
 #set(PICO_BOARD pico)
 #set(PICO_BOARD pico2)
@@ -158,7 +160,7 @@ endif()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/generated)
 # generate the header file into the source tree as it is included in the RP2040 datasheet
 pico_generate_pio_header(${PROJECT_NAME}
-    ${CMAKE_CURRENT_LIST_DIR}/src/common/ws2812.pio
+    ${CMAKE_CURRENT_LIST_DIR}/src/hardware/ws2812.pio
     OUTPUT_DIR
     ${CMAKE_CURRENT_LIST_DIR}/generated
 )
@@ -168,6 +170,7 @@ add_subdirectory(src/common)
 add_subdirectory(src/display)
 add_subdirectory(src/font)
 add_subdirectory(src/gps)
+add_subdirectory(src/hardware)
 if(ENABLE_WIFI)
     add_subdirectory(src/wifi)
 endif()
@@ -179,6 +182,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src/display
     ${CMAKE_CURRENT_LIST_DIR}/src/font
     ${CMAKE_CURRENT_LIST_DIR}/src/gps
+    ${CMAKE_CURRENT_LIST_DIR}/src/hardware
 )
 
 if(ENABLE_WIFI)
@@ -192,6 +196,8 @@ target_link_libraries(${PROJECT_NAME}
     pico_stdio
     hardware_gpio
     hardware_pio
+    hardware_uart
+    hardware_i2c
     hardware_spi
     hardware_dma
     hardware_adc

@@ -27,22 +27,33 @@
 #include <cstdio>
 #include <iomanip>
 
+#include "pico/sync.h"
+
 #include "timemgr.h"
+
+static volatile bool bInitialized = false;
+static critical_section cs;
 
 static inline void logInfo(const std::string& message)
 {
+    if (!bInitialized)
+    {
+        critical_section_init(&cs);
+        bInitialized = true;
+    }
+    critical_section_enter_blocking(&cs);
     std::stringstream ss;
     ss << "<" << get_core_num() << ">[" << TimeMgr::FormatCurrentTimestamp() << "] " << message << std::endl;
     std::string formattedMessage = ss.str();
-    // printf is supposedly thread-safe on the pico, so we can use it for logging from multiple threads.
     printf("%s", formattedMessage.c_str());
+    critical_section_exit(&cs);
 }
 
-// Helper functions to log messages with TimeMgr context
 void LogInfo(const std::string& message)
 {
     logInfo(message);
 }
+
 void LogInfoD([[maybe_unused]] const std::string& message)
 {
 #if !defined(NDEBUG)

@@ -16,6 +16,7 @@
 #include "gps.h"
 #include "display.h"
 #include "button.h"
+#include "touch.h"
 #include "font.h"
 
 enum class SpeedUnit
@@ -40,7 +41,7 @@ class GPSDevice : public std::enable_shared_from_this<GPSDevice>
 public:
     typedef std::shared_ptr<GPSDevice> Shared;
 
-    GPSDevice(Display::Shared spDisplay, GPS::Shared spGPS, Button::Shared spButton);
+    GPSDevice(Display::Shared spDisplay, GPS::Shared spGPS, Button::Shared spButton, Touch::Shared spTouch = nullptr);
     virtual ~GPSDevice() = default;
 
     virtual void Initialize();
@@ -69,11 +70,21 @@ private:
 
 protected:
     virtual bool handleButtonEvent() = 0;
+    // Handle a touch event (e.g. a tap in a screen area). Return true to trigger a display update.
+    virtual bool handleTouchEvent(const TouchEvent& event)
+    {
+        (void)event;
+        return false;
+    }
+    Touch::Shared getTouch() const
+    {
+        return m_spTouch;
+    }
     virtual void showScreenMessage(std::string strMessage) = 0;
     virtual void updateUI(GPSData::Shared spGPSData) = 0;
 
     void drawSatGrid(const GPSData::Shared& spGPSData, uint xCenter, uint yCenter, uint radius, uint nRings = 3);
-    void drawClock(uint x, uint y, uint radius, std::string strTime);
+    void drawClock(uint xCenter, uint yCenter, uint radius, std::string strTime);
     void drawCircleSat(uint gridCenterX,
                        uint gridCenterY,
                        uint nGridRadius,
@@ -182,6 +193,7 @@ private:
     bool m_bInitialized {false};
     GPS::Shared m_spGPS;
     Button::Shared m_spButton;
+    Touch::Shared m_spTouch;
     queue_t m_qIncomingGPSData;       // Queue of GPS data from the source
     GPSData::Shared m_spLastGPSData;  // Last GPS data seen, for immediate button-triggered redraws
     AlarmTimer::Shared m_spIdleTimer; // Timer to detect lack of GPS data

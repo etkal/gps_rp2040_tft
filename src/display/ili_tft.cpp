@@ -53,6 +53,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "hardware/gpio.h"
 
+#if !defined(DISPLAY_QUADRANTS)
+#define DISPLAY_QUADRANTS 4
+#endif
+
 #if !defined(DISPLAY_SPI_SPEED)
 #define DISPLAY_SPI_SPEED 20000000 // 20MHz default, override in CMakeLists.txt
 #endif
