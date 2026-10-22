@@ -185,7 +185,7 @@ bool GPS_TFT::handleTouchEvent(const TouchEvent& event)
             break;
         case TouchArea::SatGrid:
             // Handle satellite grid area tap
-            m_satIconRadius = (m_satIconRadius + 1) % 7 + 1;
+            m_satIconRadius = ((m_satIconRadius - (m_satIconRadius % 2)) % 8) + 2;
             break;
         case TouchArea::BarGraph:
             // Handle bar graph area tap
