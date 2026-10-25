@@ -367,32 +367,35 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
 
 void GPS_TFT::showSplashScreen()
 {
-#if !defined(NDEBUG)
+#if defined(NDEBUG)
+    constexpr int splashDelayMs = 1000; // Delay for splash screen
+#else
+    constexpr int splashDelayMs = 2000; // Longer delay in debug mode
+#endif
     // Palette demo splash: show all 16 named RGB565 colors with labels
     struct NamedColour
     {
         const char* name;
-        const char* hex;
         uint16_t value;
     };
 
     static const NamedColour colours[16] = {
-        {"BLACK",   "0x0000", COLOUR_BLACK  },
-        {"MAROON",  "0x8000", COLOUR_MAROON },
-        {"GREEN",   "0x0400", COLOUR_GREEN  },
-        {"OLIVE",   "0x8400", COLOUR_OLIVE  },
-        {"NAVY",    "0x0010", COLOUR_NAVY   },
-        {"PURPLE",  "0x8010", COLOUR_PURPLE },
-        {"TEAL",    "0x0410", COLOUR_TEAL   },
-        {"SILVER",  "0xC618", COLOUR_SILVER },
-        {"GRAY",    "0x8410", COLOUR_GRAY   },
-        {"RED",     "0xF800", COLOUR_RED    },
-        {"LIME",    "0x07E0", COLOUR_LIME   },
-        {"YELLOW",  "0xFFE0", COLOUR_YELLOW },
-        {"BLUE",    "0x001F", COLOUR_BLUE   },
-        {"FUCHSIA", "0xF81F", COLOUR_FUCHSIA},
-        {"AQUA",    "0x07FF", COLOUR_AQUA   },
-        {"WHITE",   "0xFFFF", COLOUR_WHITE  },
+        {"BLACK",   COLOUR_BLACK  },
+        {"MAROON",  COLOUR_MAROON },
+        {"GREEN",   COLOUR_GREEN  },
+        {"OLIVE",   COLOUR_OLIVE  },
+        {"NAVY",    COLOUR_NAVY   },
+        {"PURPLE",  COLOUR_PURPLE },
+        {"TEAL",    COLOUR_TEAL   },
+        {"SILVER",  COLOUR_SILVER },
+        {"GRAY",    COLOUR_GRAY   },
+        {"RED",     COLOUR_RED    },
+        {"LIME",    COLOUR_LIME   },
+        {"YELLOW",  COLOUR_YELLOW },
+        {"BLUE",    COLOUR_BLUE   },
+        {"FUCHSIA", COLOUR_FUCHSIA},
+        {"AQUA",    COLOUR_AQUA   },
+        {"WHITE",   COLOUR_WHITE  },
     };
 
     auto text_colour_for_bg = [](uint16_t c) -> uint16_t {
@@ -429,12 +432,54 @@ void GPS_TFT::showSplashScreen()
             m_spDisplay->FillRect(x, y, w, h, colours[i].value);
             uint16_t textColour = text_colour_for_bg(colours[i].value);
             m_spDisplay->Text(colours[i].name, x + 3, y + 3, textColour);
-            m_spDisplay->Text(colours[i].hex, x + 3, y + m_spDisplay->GetFont()->height + 3, textColour);
+            char hex[7];
+            snprintf(hex, sizeof(hex), "0x%04X", static_cast<unsigned>(colours[i].value));
+            m_spDisplay->Text(hex, x + 3, y + m_spDisplay->GetFont()->height + 3, textColour);
         }
     });
-    sleep_ms(2000);
-#endif
+
+    // A touch holds the palette until the next touch
+    auto spTouch = getTouch();
+    if (spTouch)
+    {
+        TouchEvent event;
+        spTouch->DoWork();
+        while (spTouch->GetEvent(event))
+        {
+        } // discard stale events
+
+        auto waitForTouch = [&](uint32_t timeoutMs) -> bool {
+            absolute_time_t end = make_timeout_time_ms(timeoutMs);
+            while (timeoutMs == 0 || !time_reached(end))
+            {
+                spTouch->DoWork();
+                while (spTouch->GetEvent(event))
+                {
+                    if (event.eType == TouchEventType::Down)
+                    {
+                        return true;
+                    }
+                }
+                sleep_ms(10);
+            }
+            return false;
+        };
+
+        if (waitForTouch(splashDelayMs))
+        {
+            sleep_ms(300); // let the finger lift so the same press isn't seen twice
+            spTouch->DoWork();
+            while (spTouch->GetEvent(event))
+            {
+            }
+            waitForTouch(0);
+        }
+    }
+    else
+    {
+        sleep_ms(splashDelayMs);
+    }
     SetFont(get_recommended_font(32));
     showScreenMessage(PRODUCT_SPLASH_STRING);
-    sleep_ms(2000);
+    sleep_ms(splashDelayMs);
 }

@@ -41,24 +41,23 @@ using std::max;
 using std::min;
 using std::size_t;
 
-// Fixed 16 colour palette (Windows colours as RGB565), matching COLOUR_* in ili_tft.h
-static const uint16_t s_palette565[16] = {
-    0x0000,
-    0x8000,
-    0x0400,
-    0x8400,
-    0x0010,
-    0x8010,
-    0x0410,
-    0xC618,
-    0x8410,
-    0xF800,
-    0x07E0,
-    0xFFE0,
-    0x001F,
-    0xF81F,
-    0x07FF,
-    0xFFFF,
+static constexpr uint16_t s_palette565[] = {
+    COLOUR_BLACK,
+    COLOUR_MAROON,
+    COLOUR_GREEN,
+    COLOUR_OLIVE,
+    COLOUR_NAVY,
+    COLOUR_PURPLE,
+    COLOUR_TEAL,
+    COLOUR_SILVER,
+    COLOUR_GRAY,
+    COLOUR_RED,
+    COLOUR_LIME,
+    COLOUR_YELLOW,
+    COLOUR_BLUE,
+    COLOUR_FUCHSIA,
+    COLOUR_AQUA,
+    COLOUR_WHITE,
 };
 
 // Map an RGB565 colour to the palette index (exact match, else nearest colour)

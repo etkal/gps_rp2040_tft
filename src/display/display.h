@@ -14,24 +14,6 @@
 
 #include "framebuf.h"
 
-// Windows 16-bit colour pallet converted to 5-6-5
-inline constexpr uint16_t COLOUR_BLACK = 0x0000;
-inline constexpr uint16_t COLOUR_MAROON = 0x8000;
-inline constexpr uint16_t COLOUR_GREEN = 0x0400;
-inline constexpr uint16_t COLOUR_OLIVE = 0x8400;
-inline constexpr uint16_t COLOUR_NAVY = 0x0010;
-inline constexpr uint16_t COLOUR_PURPLE = 0x8010;
-inline constexpr uint16_t COLOUR_TEAL = 0x0410;
-inline constexpr uint16_t COLOUR_SILVER = 0xC618;
-inline constexpr uint16_t COLOUR_GRAY = 0x8410;
-inline constexpr uint16_t COLOUR_RED = 0xF800;
-inline constexpr uint16_t COLOUR_LIME = 0x07E0;
-inline constexpr uint16_t COLOUR_YELLOW = 0xFFE0;
-inline constexpr uint16_t COLOUR_BLUE = 0x001F;
-inline constexpr uint16_t COLOUR_FUCHSIA = 0xF81F;
-inline constexpr uint16_t COLOUR_AQUA = 0x07FF;
-inline constexpr uint16_t COLOUR_WHITE = 0xFFFF;
-
 enum ROTATION
 {
     R0DEG,

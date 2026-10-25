@@ -8,9 +8,31 @@
 #pragma once
 
 #include <memory>
+#include <cstdint>
 
 #include "pico/stdlib.h"
 #include "font.h"
+
+// Windows 16-bit colour palette converted to RGB565
+enum eColour : uint16_t
+{
+    COLOUR_BLACK = 0x0000,
+    COLOUR_MAROON = 0x8000,
+    COLOUR_GREEN = 0x0400,
+    COLOUR_OLIVE = 0x8400,
+    COLOUR_NAVY = 0x0010,
+    COLOUR_PURPLE = 0x8010,
+    COLOUR_TEAL = 0x0410,
+    COLOUR_SILVER = 0xC618,
+    COLOUR_GRAY = 0x8410,
+    COLOUR_RED = 0xF800,
+    COLOUR_LIME = 0x07E0,
+    COLOUR_YELLOW = 0xFFE0,
+    COLOUR_BLUE = 0x001F,
+    COLOUR_FUCHSIA = 0xF81F,
+    COLOUR_AQUA = 0x07FF,
+    COLOUR_WHITE = 0xFFFF,
+};
 
 #if !defined(DISPLAY_COLOUR_FORMAT)
 #define DISPLAY_COLOUR_FORMAT RGB565
@@ -18,13 +40,13 @@
 
 typedef enum ePixelFormat
 {
-    MVLSB,  // ssd1306
-    RGB565, // ili9341
-    MHLSB,
-    MHMSB,
-    RGB666, // 18-bit pixel format (3 bytes per pixel)
-    RGB565_BYTE, // 1 byte per pixel palette index (16 colours), sent to display as RGB565
-    RGB666_BYTE, // 1 byte per pixel palette index (16 colours), sent to display as RGB666
+    MVLSB,         // ssd1306
+    RGB565,        // ili934x / ili948x / st7796
+    MHLSB,         // unused
+    MHMSB,         // unused
+    RGB666,        // 18-bit pixel format (3 bytes per pixel) - required for some displays like ili9488
+    RGB565_BYTE,   // 1 byte per pixel palette index (16 colours), sent to display as RGB565
+    RGB666_BYTE,   // 1 byte per pixel palette index (16 colours), sent to display as RGB666
     RGB565_NIBBLE, // 4 bits per pixel palette index (2 pixels per byte, even x in high nibble), sent as RGB565
     RGB666_NIBBLE, // 4 bits per pixel palette index (2 pixels per byte, even x in high nibble), sent as RGB666
 } ePixelFormat;
