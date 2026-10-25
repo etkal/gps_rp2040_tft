@@ -24,6 +24,8 @@
 #include <limits>
 
 #include "pico/stdlib.h"
+#include "hardware/clocks.h"
+#include "hardware/vreg.h"
 
 #if defined(PLATFORM_PICO_W)
 #include "pico/cyw43_arch.h"
@@ -66,7 +68,10 @@
 #define STOP_BITS      1
 #define PARITY         UART_PARITY_NONE
 
+// SPI configuration for the display and touch controller based on the board type.
+//
 #if defined(DISPLAY_PICO_RESTOUCH) // Waveshare Pico-ResTouch-LCD-3.5
+// The Waveshare Pico-ResTouch-LCD-3.5 shares SPI1 with the touch controller.
 #define SPI_DEVICE spi1
 #define PIN_DC     8
 #define PIN_CS     9
@@ -78,6 +83,7 @@
 #define TP_CS      16
 #define TP_IRQ     17
 #elif defined(PLATFORM_PICO)                   // Pico, Pico W, Pico 2, Pico 2 W
+// Use default SPI0 pins for the Pico boards and put the touch controller on SPI1
 #define SPI_DEVICE    spi_default              // Default is SPI0 for Pico
 #define PIN_MISO      PICO_DEFAULT_SPI_RX_PIN  // White  16
 #define PIN_CS        PICO_DEFAULT_SPI_CSN_PIN // Orange 17
@@ -93,7 +99,7 @@
 #define TP_MOSI       15
 #define TP_IRQ        11
 #elif defined(SEEED_XIAO_RP2040)
-// XIAO has spi0 CSn overlap with uart0, so override
+// XIAO has spi0 CSn overlap with uart0, so override, touch might not be possible/easy
 #define SPI_DEVICE spi_default              // Default is SPI0 for XIAO
 #define PIN_MISO   PICO_DEFAULT_SPI_RX_PIN  // White  4
 #define PIN_CS     26                       // Orange
@@ -103,7 +109,7 @@
 #define PIN_DC     28                       // Green
 #define PIN_BL     29                       // Gray
 #elif defined(WAVESHARE_RP2040_ZERO)
-// RP2040-Zero has default spi1, which is on the bottom, so use spi0
+// RP2040-Zero has default spi1, which is on the bottom, so use spi0, touch might not be easy
 #define SPI_DEVICE spi0 // override
 #define PIN_MISO   4    // White
 #define PIN_CS     5    // Org
@@ -120,7 +126,7 @@
 // #define USE_LED_PIN 16    // Override
 
 // GPIO pin for a button
-#define PIN_BUTTON 6
+// #define PIN_BUTTON 6
 
 namespace
 {
@@ -154,6 +160,18 @@ extern "C"
 
 int main()
 {
+#if defined(SYS_CLOCK_KHZ)
+    // Must be set before any peripheral init. The SDK leaves clk_peri on the 48MHz USB PLL, so move it
+    // back to clk_sys to get the higher SPI rates.
+#if SYS_CLOCK_KHZ > 133000
+    // Overclocking: raise the core voltage first for stability
+    vreg_set_voltage(VREG_VOLTAGE_1_15);
+    sleep_ms(10);
+#endif
+    set_sys_clock_khz(SYS_CLOCK_KHZ, true);
+    clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS, SYS_CLOCK_KHZ * 1000, SYS_CLOCK_KHZ * 1000);
+#endif
+
 #if !defined(PICO_DEBUGPROBE)
     stdio_usb_init();
 #else
@@ -217,14 +235,14 @@ int main()
     spLED->SetIgnore({led_red, led_magenta});
 #endif
 
-    // Create the button object
+    // Create the button object, null if no button is defined
     Button::Shared spButton;
 #if defined(PIN_BUTTON)
     spButton = std::make_shared<Button>(PIN_BUTTON);
     spButton->Initialize();
 #endif
 
-    // Create the touch object, which might share the display SPI bus
+    // Create the touch object, null if no touch controller is defined
     Touch::Shared spTouch;
 #if defined(TP_CS) && defined(TP_IRQ)
 #if defined(TP_SPI_DEVICE)
@@ -234,7 +252,7 @@ int main()
 #endif
 #endif
 
-    LogInfo("Creating GPS objects...");
+    LogInfo("Creating GPS/UART objects...");
     // Create the GPS object
     GPS_UART::Shared spGPS = std::make_shared<GPS_UART>();
     spGPS->SetInputUART(UART0_DEVICE, PIN_UART0_TX, PIN_UART0_RX, DATA_BITS, STOP_BITS, PARITY, UART_BAUD_RATE);
@@ -277,7 +295,7 @@ int main()
             spLED->DoWork(); // Handle any outstanding work (e.g. turn off blink)
         }
 
-        spGPS->DoWork(); // Process the GPS
+        spGPS->DoWork(); // Process the GPS sentences (noop if it is autonomous on core 1)
 
         spDevice->DoWork(); // Process the GPSDisplay (noop if it is autonomous on core 1)
 
@@ -290,8 +308,9 @@ int main()
                 const uint64_t uptimeSec = time_us_64() / 1000000;
                 const bool bNeverRetried = (nLastTimeSyncAttemptSec == std::numeric_limits<uint64_t>::max());
                 const bool bUpdateDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
-                                        (uptimeSec - nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec); // ||
-                // !TimeMgr::IsGpsTimeDateWithinOneSecond(strGPSTimeRaw, strGPSDateRaw);
+                                        (uptimeSec - nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec);
+                // The following might trigger unnessary correction based on fractional accuracy of the GPS time.
+                // || !TimeMgr::IsGpsTimeDateWithinOneSecond(strGPSTimeRaw, strGPSDateRaw);
                 if (bUpdateDue)
                 {
                     nLastTimeSyncAttemptSec = uptimeSec;

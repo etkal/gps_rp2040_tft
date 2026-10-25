@@ -320,6 +320,8 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
         // Draw tap echo if enabled
         if (bDisplayTapEcho)
         {
+            // uint nLineHeight = getLineAdvance();
+            uint nCharWidth = getCharWidth();
             auto nColor = COLOUR_FUCHSIA;
             switch (static_cast<TouchArea::Id>(m_nTappedAreaId))
             {
@@ -336,8 +338,8 @@ void GPS_TFT::updateUI(GPSData::Shared spGPSData)
                 Rect(m_nTextAreaX, m_nTextAreaY, m_nTextAreaWidth, m_nTextAreaHeight, nColor, false);
                 break;
             case TouchArea::BarGraph:
-                Rect(m_nBarGraphX + 1, m_nBarGraphY + 1, m_nBarGraphWidth - 2, m_nBarGraphHeight - 2, nColor, false);
-                Rect(m_nBarGraphX, m_nBarGraphY, m_nBarGraphWidth, m_nBarGraphHeight, nColor, false);
+                Rect(m_nBarGraphX + 1, m_nBarGraphY + 1, m_nBarGraphWidth + nCharWidth - 3, m_nBarGraphHeight - 3, nColor, false);
+                Rect(m_nBarGraphX, m_nBarGraphY, m_nBarGraphWidth + nCharWidth - 1, m_nBarGraphHeight - 1, nColor, false);
                 break;
             case TouchArea::UpperLeft:
                 Ellipse(m_nUpperLeftX, m_nUpperLeftY, m_nUpperLeftRadius + 1, m_nUpperLeftRadius + 1, nColor, false);

@@ -8,8 +8,8 @@
  * rather than continually polling the IRQ pin.  In addition, the timing and sensitivity of
  * the touch handling is optimized based on my own experimentation with finger presses, etc.
  *
- * The controller shares the SPI bus with the display, so this class is designed to stay out
- * of the way of the display:
+ * The controller might share the SPI bus with the display, so this class is designed to stay
+ * out of the way of the display:
  *
  *  - The touch IRQ pin (active low) triggers a GPIO interrupt handler. The handler only masks
  *      further interrupts from the pin and sets a flag; no SPI traffic occurs in the interrupt
@@ -67,13 +67,17 @@ struct TouchCalibration
     uint16_t nRefHeight {320};
 };
 
+#if !defined(TOUCH_SPI_SPEED)
+#define TOUCH_SPI_SPEED 2000000 // XPT2046 sampling speed, override in CMakeLists.txt
+#endif
+
 class Touch : public std::enable_shared_from_this<Touch>
 {
 public:
     typedef std::shared_ptr<Touch> Shared;
 
-    Touch(spi_inst_t* spi, uint nCsPin, uint nIrqPin, ROTATION rotation, uint nSpiBaud = 2000000);
-    Touch(spi_inst_t* spi, uint nMisoPin, uint nMosiPin, uint nSckPin, uint nCsPin, uint nIrqPin, ROTATION rotation, uint nSpiBaud = 2000000);
+    Touch(spi_inst_t* spi, uint nCsPin, uint nIrqPin, ROTATION rotation, uint nSpiBaud = TOUCH_SPI_SPEED);
+    Touch(spi_inst_t* spi, uint nMisoPin, uint nMosiPin, uint nSckPin, uint nCsPin, uint nIrqPin, ROTATION rotation, uint nSpiBaud = TOUCH_SPI_SPEED);
     ~Touch();
 
     // Must be called on the core which will call DoWork() (the GPIO interrupt is per core), after the

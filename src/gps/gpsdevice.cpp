@@ -466,7 +466,7 @@ void GPSDevice::drawBarGraph(const GPSData::Shared& spGPSData, uint x, uint y, u
     {
         auto oSat = oEntry.second;
         uint rssi = oSat.m_rssi;
-        uint barHeight = (int)((double)barHeightMax * (double)rssi / 64);
+        uint barHeight = (int)(0.9 * (double)barHeightMax * (double)rssi / 64);
         uint baseLineY = y + barHeightMax;
         m_spDisplay->HLine(barPosX, baseLineY, barDelta, COLOUR_WHITE);
         uint nSat = oSat.m_num;

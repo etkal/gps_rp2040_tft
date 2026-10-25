@@ -86,6 +86,26 @@ Touch::~Touch()
 
 void Touch::defaultCalibration()
 {
+#if defined(DISPLAY_ILI934X)
+    // Waveshare Pico-ResTouch-LCD-2.8 (240x320) RP2040 factors from LCD_Touch.c TP_GetAdFac().
+    // R0DEG/R270DEG are the 180 degree flips of R180DEG/R90DEG.
+    switch (m_rotation % 4)
+    {
+    case 0: // R0DEG
+        m_cal = {false, -0.066339f, -0.087059f, 253.0f, 346.0f, 240, 320};
+        break;
+    case 1: // R90DEG (U2D_R2L)
+        m_cal = {true, -0.089616f, 0.063399f, 350.0f, -5.0f, 320, 240};
+        break;
+    case 2: // R180DEG (R2L_D2U)
+        m_cal = {false, 0.066339f, 0.087059f, -13.0f, -26.0f, 240, 320};
+        break;
+    default: // R270DEG
+        m_cal = {true, 0.089616f, -0.063399f, -30.0f, 245.0f, 320, 240};
+        break;
+    }
+    return;
+#else
     // Waveshare Pico-ResTouch-LCD-3.5 factors. The mapping from display rotation to touch panel
     // orientation depends on how the panel is mounted; adjust with SetCalibration() if needed.
     switch (m_rotation % 4)
@@ -103,6 +123,8 @@ void Touch::defaultCalibration()
         m_cal = {true, 0.1324f, -0.0900f, -36.0f, 342.0f, 480, 320};
         break;
     }
+    return;
+#endif
 }
 
 void Touch::SetCalibration(const TouchCalibration& cal)
@@ -119,7 +141,8 @@ void Touch::Initialize(uint16_t nDispWidth, uint16_t nDispHeight)
     if (!m_bSharedSpi)
     {
         // If we have our own SPI buss initialize it and configure the pins
-        spi_init(m_spi, m_nSpiBaud);
+        auto spiSpeed = spi_init(m_spi, m_nSpiBaud);
+        LogInfo("Touch SPI initialized with speed: " + std::to_string(spiSpeed));
         gpio_set_function(m_nMisoPin, GPIO_FUNC_SPI);
         gpio_set_function(m_nMosiPin, GPIO_FUNC_SPI);
         gpio_set_function(m_nSckPin, GPIO_FUNC_SPI);
@@ -132,6 +155,10 @@ void Touch::Initialize(uint16_t nDispWidth, uint16_t nDispHeight)
     gpio_init(m_nIrqPin);
     gpio_set_dir(m_nIrqPin, GPIO_IN);
     gpio_pull_up(m_nIrqPin);
+
+    // Prime the controller: it only drives the pen IRQ line after it has received a conversion command
+    uint16_t nPrimeX, nPrimeY;
+    readRaw(nPrimeX, nPrimeY);
 
     sm_pInstance = this;
 
@@ -220,10 +247,26 @@ bool Touch::readRaw(uint16_t& nRawX, uint16_t& nRawY)
     // The touch controller needs a slower clock than the display. If we are sharing the SPI bus,
     // temporarily lower its speed and restore the display speed afterwards.
     uint nPrevBaud;
+    static bool bLoggedBaudRate = false;
     if (m_bSharedSpi)
     {
+        // Wait for any display traffic to finish and discard stale RX data before changing the clock
+        while (spi_get_hw(m_spi)->sr & SPI_SSPSR_BSY_BITS)
+        {
+            tight_loop_contents();
+        }
+        while (spi_is_readable(m_spi))
+        {
+            (void)spi_get_hw(m_spi)->dr;
+        }
+        spi_get_hw(m_spi)->icr = SPI_SSPICR_RORIC_BITS;
         nPrevBaud = spi_get_baudrate(m_spi);
-        spi_set_baudrate(m_spi, m_nSpiBaud);
+        auto spiSpeed = spi_set_baudrate(m_spi, m_nSpiBaud);
+        if (!bLoggedBaudRate)
+        {
+            LogInfo("Touch SPI baud rate set to: " + std::to_string(spiSpeed));
+            bLoggedBaudRate = true;
+        }
     }
 
     uint16_t x1 = readAdcAverage(CMD_READ_X);
