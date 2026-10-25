@@ -31,6 +31,7 @@
 #include "framebuf.h"
 
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 
 #include "font.h"
@@ -39,6 +40,59 @@
 using std::max;
 using std::min;
 using std::size_t;
+
+static constexpr uint16_t s_palette565[] = {
+    COLOUR_BLACK,
+    COLOUR_MAROON,
+    COLOUR_GREEN,
+    COLOUR_OLIVE,
+    COLOUR_NAVY,
+    COLOUR_PURPLE,
+    COLOUR_TEAL,
+    COLOUR_SILVER,
+    COLOUR_GRAY,
+    COLOUR_RED,
+    COLOUR_LIME,
+    COLOUR_YELLOW,
+    COLOUR_BLUE,
+    COLOUR_FUCHSIA,
+    COLOUR_AQUA,
+    COLOUR_WHITE,
+};
+
+// Map an RGB565 colour to the palette index (exact match, else nearest colour)
+static uint8_t paletteIndex(uint16_t color)
+{
+    static uint16_t lastColor = 0;
+    static uint8_t lastIndex = 0;
+    if (color == lastColor)
+    {
+        return lastIndex;
+    }
+    uint8_t best = 0;
+    int bestDist = 0x7fffffff;
+    int r = (color >> 11) & 0x1f, g = (color >> 5) & 0x3f, b = color & 0x1f;
+    for (uint8_t i = 0; i < 16; ++i)
+    {
+        uint16_t p = s_palette565[i];
+        int dr = r - ((p >> 11) & 0x1f);
+        int dg = (g - ((p >> 5) & 0x3f)) >> 1;
+        int db = b - (p & 0x1f);
+        int dist = dr * dr + dg * dg + db * db;
+        if (dist < bestDist)
+        {
+            bestDist = dist;
+            best = i;
+            if (0 == dist)
+            {
+                break;
+            }
+        }
+    }
+    lastColor = color;
+    lastIndex = best;
+    return best;
+}
 
 Framebuf::Framebuf()
 {
@@ -55,6 +109,10 @@ Framebuf::~Framebuf()
     case MVLSB:
     case MHLSB:
     case MHMSB:
+    case RGB565_BYTE:
+    case RGB666_BYTE:
+    case RGB565_NIBBLE:
+    case RGB666_NIBBLE:
         delete[] (uint8_t*)m_pBuf;
         break;
     case RGB565:
@@ -90,6 +148,7 @@ void Framebuf::Initialize(uint16_t nWidth, uint16_t nHeight, ePixelFormat eForma
         m_pBuf = new uint8_t[m_nWidth * m_nHeight / 8];
         m_nStride = (m_nStride + 7) & ~7;
         m_nPixelSize = 1;
+        m_nStoredSize = 1;
         break;
     case RGB565:
         if (nullptr != m_pBuf)
@@ -98,6 +157,7 @@ void Framebuf::Initialize(uint16_t nWidth, uint16_t nHeight, ePixelFormat eForma
         }
         m_pBuf = new uint16_t[m_nWidth * m_nHeight];
         m_nPixelSize = 2;
+        m_nStoredSize = 2;
         break;
     case RGB666:
         if (nullptr != m_pBuf)
@@ -106,10 +166,57 @@ void Framebuf::Initialize(uint16_t nWidth, uint16_t nHeight, ePixelFormat eForma
         }
         m_pBuf = new pixel666[m_nWidth * m_nHeight];
         m_nPixelSize = 3;
+        m_nStoredSize = 3;
+        break;
+    case RGB565_BYTE:
+    case RGB666_BYTE:
+    case RGB565_NIBBLE:
+    case RGB666_NIBBLE:
+        if (nullptr != m_pBuf)
+        {
+            delete[] (uint8_t*)m_pBuf;
+        }
+        // Nibble formats pack 2 pixels per byte; the buffer is zeroed so unset pixels are palette index 0 (black)
+        m_pBuf = new uint8_t[isNibble() ? (static_cast<size_t>(m_nWidth) * m_nHeight + 1) / 2 : static_cast<size_t>(m_nWidth) * m_nHeight]();
+        m_nStoredSize = 1;
+        for (int i = 0; i < 16; ++i)
+        {
+            uint16_t p = s_palette565[i];
+            if (RGB565_BYTE == m_eFormat || RGB565_NIBBLE == m_eFormat)
+            {
+                uint16_t v = m_bRevBytes ? __builtin_bswap16(p) : p;
+                memcpy(m_lut[i], &v, 2);
+            }
+            else
+            {
+                m_lut[i][0] = ((p >> 11) & 0x1f) << 3;
+                m_lut[i][1] = ((p >> 5) & 0x3f) << 2;
+                m_lut[i][2] = (p & 0x1f) << 3;
+            }
+        }
+        m_nPixelSize = (RGB565_BYTE == m_eFormat || RGB565_NIBBLE == m_eFormat) ? 2 : 3;
         break;
     default:
         m_pBuf = nullptr;
         break;
+    }
+}
+
+void Framebuf::expandPixels(const uint8_t* base, size_t nFirst, uint8_t* dst, size_t n)
+{
+    const bool nibble = isNibble();
+    const bool two = (2 == m_nPixelSize);
+    for (size_t i = 0; i < n; ++i)
+    {
+        size_t idx = nFirst + i;
+        uint8_t v = nibble ? ((idx & 1) ? (base[idx >> 1] & 0x0f) : (base[idx >> 1] >> 4)) : (base[idx] & 0x0f);
+        const uint8_t* l = m_lut[v];
+        *dst++ = l[0];
+        *dst++ = l[1];
+        if (!two)
+        {
+            *dst++ = l[2];
+        }
     }
 }
 
@@ -143,6 +250,14 @@ void Framebuf::setPixel(int x, int y, uint16_t color)
         ((pixel666*)m_pBuf)[x + y * m_nStride] = color;
     }
     break;
+    case RGB565_BYTE:
+    case RGB666_BYTE:
+        ((uint8_t*)m_pBuf)[x + y * m_nStride] = paletteIndex(color);
+        break;
+    case RGB565_NIBBLE:
+    case RGB666_NIBBLE:
+        setNibble(x + static_cast<size_t>(y) * m_nStride, paletteIndex(color));
+        break;
     default:
         return;
         break;
@@ -170,6 +285,14 @@ uint16_t Framebuf::getPixel(int x, int y)
         break;
     case RGB666:
         return ((pixel666*)m_pBuf)[x + y * m_nStride];
+        break;
+    case RGB565_BYTE:
+    case RGB666_BYTE:
+        return s_palette565[((uint8_t*)m_pBuf)[x + y * m_nStride] & 0x0f];
+        break;
+    case RGB565_NIBBLE:
+    case RGB666_NIBBLE:
+        return s_palette565[getNibble(x + static_cast<size_t>(y) * m_nStride)];
         break;
     default:
         return 0;
@@ -213,6 +336,44 @@ void Framebuf::fillRect(int x, int y, int w, int h, uint16_t color)
                 *b++ = fixcolor(color);
             }
             b += m_nStride - w;
+        }
+    }
+    break;
+    case RGB565_BYTE:
+    case RGB666_BYTE:
+    {
+        uint8_t* b = &((uint8_t*)m_pBuf)[x + y * m_nStride];
+        uint8_t idx = paletteIndex(color);
+        while (h--)
+        {
+            memset(b, idx, w);
+            b += m_nStride;
+        }
+    }
+    break;
+    case RGB565_NIBBLE:
+    case RGB666_NIBBLE:
+    {
+        uint8_t idx = paletteIndex(color);
+        while (h--)
+        {
+            size_t p = x + static_cast<size_t>(y) * m_nStride;
+            size_t n = w;
+            if ((p & 1) && n)
+            {
+                setNibble(p++, idx);
+                --n;
+            }
+            if (n >= 2)
+            {
+                memset(&((uint8_t*)m_pBuf)[p >> 1], (idx << 4) | idx, n >> 1);
+                p += n & ~static_cast<size_t>(1);
+            }
+            if (n & 1)
+            {
+                setNibble(p, idx);
+            }
+            ++y;
         }
     }
     break;

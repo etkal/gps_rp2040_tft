@@ -110,6 +110,7 @@ public:
     void Run();
     void DoWork();
     void Stop();
+    bool IsInitialized();
 
     void SetSentenceCallback(void* pCtx, sentenceCallback pCB);
     void SetGpsDataCallback(void* pCtx, gpsDataCallback pCB);
@@ -144,9 +145,10 @@ private:
     SatList m_mSatListIncoming;
     SatList m_mSatListPersistent;
 
-    AlarmTimer::Shared m_spIdleTimer;     // Timer to detect lack of GPS data
+    AlarmTimer::Shared m_spIdleTimer; // Timer to detect lack of GPS data
     gpsDataCallback m_pGpsDataCallback {nullptr};
     void* m_pGpsDataCtx {nullptr};
+    critical_section m_Cs;
 };
 
 // Helper class for safe GPS sentence processing.

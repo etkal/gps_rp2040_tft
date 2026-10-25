@@ -71,6 +71,7 @@ static std::string formatDouble(double dValue, std::string strUnit)
 
 GPS::GPS()
 {
+    critical_section_init(&m_Cs);
 }
 
 GPS::~GPS()
@@ -101,11 +102,10 @@ void GPS::SetMessageCallback(void* pCtx, messageCallback pCB)
 
 void GPS::Initialize()
 {
-    if (m_bInitialized)
+    if (IsInitialized())
     {
         return;
     }
-    m_bInitialized = true;
 
     // If we are on core 1 we need to ensure timers fire on that core.
     if (1 == get_core_num())
@@ -127,6 +127,10 @@ void GPS::Initialize()
             m_spGPSData.reset();
         },
         m_pAlarmPool);
+
+    critical_section_enter_blocking(&m_Cs);
+    m_bInitialized = true;
+    critical_section_exit(&m_Cs);
 }
 
 // Setup and either run continuously with Run() or process a single iteration with DoWork()
@@ -200,7 +204,9 @@ void GPS::DoWork()
     }
     else
     {
+        critical_section_enter_blocking(&m_Cs);
         m_bInitialized = false;
+        critical_section_exit(&m_Cs);
         if (m_spIdleTimer)
         {
             m_spIdleTimer->Stop();
@@ -222,6 +228,14 @@ void GPS::DoWork()
 void GPS::Stop()
 {
     m_bExit = true;
+}
+
+bool GPS::IsInitialized()
+{
+    critical_section_enter_blocking(&m_Cs);
+    bool bInitialized = m_bInitialized;
+    critical_section_exit(&m_Cs);
+    return bInitialized;
 }
 
 // Handle a received sentence. This function will validate the sentence and update the GPS data accordingly.

@@ -24,6 +24,7 @@ namespace
 
 GPS_gpsd::GPS_gpsd()
 {
+    queue_init(&m_qSentences, GPS_BUFSIZE, GPS_QUEUE_SIZE); // Initialize the queue for received sentences
 }
 
 GPS_gpsd::~GPS_gpsd()
@@ -36,8 +37,6 @@ void GPS_gpsd::Initialize()
 {
     GPS::Initialize();
 
-    // Initialize the queue for received sentences. This uses the SDK queue_t structure for thread-safe access.
-    queue_init(&m_qSentences, GPS_BUFSIZE, GPS_QUEUE_SIZE); // Initialize the queue for received sentences
     m_connectDelayMs = GPSD_CONNECT_DELAY_INITIAL_MS;
     m_bReadyToConnect = true;
     WifiConnection::GetInstance()->SetStateCallback(this, wifiStateCallback);

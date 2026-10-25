@@ -14,6 +14,8 @@ endif()
 # ====================================================================================
 cmake_minimum_required(VERSION 3.24)
 
+add_compile_definitions(PRODUCT_SPLASH_STRING="ET GPS TFT v1.1")
+
 # Set the board type for pin and LED decisions
 #set(PICO_BOARD pico)
 #set(PICO_BOARD pico2)
@@ -45,22 +47,35 @@ add_compile_definitions(DISPLAY_ON_CORE_1)
 add_compile_definitions(DISPLAY_ILI948X)
 #add_compile_definitions(DISPLAY_ST7796)
 
+# System clock in kHz (default 125000). The SPI clock is clk_peri (= clk_sys) divided by an even number, so
+# e.g. 160000 allows exactly 40MHz SPI, whereas 125MHz can only give 62.5/31.25MHz.
+#
+add_compile_definitions(SYS_CLOCK_KHZ=144000)
+
 # SPI device speed for the display. They seem to be able to handle 40MHz, but some boards may not be
 # able to handle that speed. If you have issues, try 20MHz or 10MHz.
 #
-add_compile_definitions(DISPLAY_SPI_SPEED=40000000)
-
+add_compile_definitions(DISPLAY_SPI_SPEED=36000000)
+    
 # Set the following if using Waveshare Pico-ResTouch-LCD for GPIO assignments.
 #
 add_compile_definitions(DISPLAY_PICO_RESTOUCH)
 
 # ILI9341, ILI948X and ST7796 can all use 18-bit pixels (RGB666), but the default is 16-bit (RGB565).
 #
+# Use full colour depth (16-bit or 18-bit) for the display, if not enough memory use quadrants.
+#add_compile_definitions(DISPLAY_COLOUR_FORMAT=RGB565)
 #add_compile_definitions(DISPLAY_COLOUR_FORMAT=RGB666)
+# Use 1 byte per pixel (16-colour palette lookup at display time) to save RAM:
+#add_compile_definitions(DISPLAY_COLOUR_FORMAT=RGB565_BYTE)
+#add_compile_definitions(DISPLAY_COLOUR_FORMAT=RGB666_BYTE)
+# Use 4 bits per pixel (2 pixels per byte) for the smallest framebuffer:
+add_compile_definitions(DISPLAY_COLOUR_FORMAT=RGB565_NIBBLE)
+#add_compile_definitions(DISPLAY_COLOUR_FORMAT=RGB666_NIBBLE)
 
 # Number of quadrants to use, needed for memory usage
 #
-add_compile_definitions(DISPLAY_QUADRANTS=4)
+add_compile_definitions(DISPLAY_QUADRANTS=1)
 
 # Set the display rotation, one of R0DEG, R90DEG, R180DEG, R270DEG
 #
@@ -158,7 +173,7 @@ endif()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/generated)
 # generate the header file into the source tree as it is included in the RP2040 datasheet
 pico_generate_pio_header(${PROJECT_NAME}
-    ${CMAKE_CURRENT_LIST_DIR}/src/common/ws2812.pio
+    ${CMAKE_CURRENT_LIST_DIR}/src/hardware/ws2812.pio
     OUTPUT_DIR
     ${CMAKE_CURRENT_LIST_DIR}/generated
 )
@@ -168,6 +183,7 @@ add_subdirectory(src/common)
 add_subdirectory(src/display)
 add_subdirectory(src/font)
 add_subdirectory(src/gps)
+add_subdirectory(src/hardware)
 if(ENABLE_WIFI)
     add_subdirectory(src/wifi)
 endif()
@@ -179,6 +195,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src/display
     ${CMAKE_CURRENT_LIST_DIR}/src/font
     ${CMAKE_CURRENT_LIST_DIR}/src/gps
+    ${CMAKE_CURRENT_LIST_DIR}/src/hardware
 )
 
 if(ENABLE_WIFI)
@@ -192,9 +209,12 @@ target_link_libraries(${PROJECT_NAME}
     pico_stdio
     hardware_gpio
     hardware_pio
+    hardware_uart
+    hardware_i2c
     hardware_spi
     hardware_dma
     hardware_adc
+    hardware_vreg
     pico_aon_timer
     pico_multicore
 )

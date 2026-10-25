@@ -8,9 +8,31 @@
 #pragma once
 
 #include <memory>
+#include <cstdint>
 
 #include "pico/stdlib.h"
 #include "font.h"
+
+// Windows 16-bit colour palette converted to RGB565
+enum eColour : uint16_t
+{
+    COLOUR_BLACK = 0x0000,
+    COLOUR_MAROON = 0x8000,
+    COLOUR_GREEN = 0x0400,
+    COLOUR_OLIVE = 0x8400,
+    COLOUR_NAVY = 0x0010,
+    COLOUR_PURPLE = 0x8010,
+    COLOUR_TEAL = 0x0410,
+    COLOUR_SILVER = 0xC618,
+    COLOUR_GRAY = 0x8410,
+    COLOUR_RED = 0xF800,
+    COLOUR_LIME = 0x07E0,
+    COLOUR_YELLOW = 0xFFE0,
+    COLOUR_BLUE = 0x001F,
+    COLOUR_FUCHSIA = 0xF81F,
+    COLOUR_AQUA = 0x07FF,
+    COLOUR_WHITE = 0xFFFF,
+};
 
 #if !defined(DISPLAY_COLOUR_FORMAT)
 #define DISPLAY_COLOUR_FORMAT RGB565
@@ -18,11 +40,15 @@
 
 typedef enum ePixelFormat
 {
-    MVLSB,  // ssd1306
-    RGB565, // ili9341
-    MHLSB,
-    MHMSB,
-    RGB666, // 18-bit pixel format (3 bytes per pixel)
+    MVLSB,         // ssd1306
+    RGB565,        // ili934x / ili948x / st7796
+    MHLSB,         // unused
+    MHMSB,         // unused
+    RGB666,        // 18-bit pixel format (3 bytes per pixel) - required for some displays like ili9488
+    RGB565_BYTE,   // 1 byte per pixel palette index (16 colours), sent to display as RGB565
+    RGB666_BYTE,   // 1 byte per pixel palette index (16 colours), sent to display as RGB666
+    RGB565_NIBBLE, // 4 bits per pixel palette index (2 pixels per byte, even x in high nibble), sent as RGB565
+    RGB666_NIBBLE, // 4 bits per pixel palette index (2 pixels per byte, even x in high nibble), sent as RGB666
 } ePixelFormat;
 
 struct pixel666
@@ -135,10 +161,27 @@ protected:
     {
         return m_nHeight;
     }
+    // Bytes per pixel as sent to the display
     inline uint16_t pixelSize()
     {
         return m_nPixelSize;
     }
+    // Bytes per pixel as stored in the framebuffer (differs from pixelSize() for the _BYTE formats)
+    inline uint16_t storedPixelSize()
+    {
+        return m_nStoredSize;
+    }
+    inline bool isPalettized()
+    {
+        return RGB565_BYTE == m_eFormat || RGB666_BYTE == m_eFormat || isNibble();
+    }
+    inline bool isNibble()
+    {
+        return RGB565_NIBBLE == m_eFormat || RGB666_NIBBLE == m_eFormat;
+    }
+    // Convert n palette-indexed pixels starting at pixel index nFirst of the framebuffer to display
+    // format using the lookup table
+    void expandPixels(const uint8_t* base, size_t nFirst, uint8_t* dst, size_t n);
 
 private:
     bool check(int& x, int& y);
@@ -157,9 +200,20 @@ private:
     void ellipse_points(int cx, int cy, int x, int y, uint16_t color, uint8_t mask);
     void setpixel_masked(int x, int y, uint16_t color, uint8_t mask);
 
+    inline uint8_t getNibble(size_t index) const
+    {
+        uint8_t v = ((const uint8_t*)m_pBuf)[index >> 1];
+        return (index & 1) ? (v & 0x0f) : (v >> 4);
+    }
+    inline void setNibble(size_t index, uint8_t value)
+    {
+        uint8_t& v = ((uint8_t*)m_pBuf)[index >> 1];
+        v = (index & 1) ? ((v & 0xf0) | value) : ((v & 0x0f) | (value << 4));
+    }
+
     void scroll(int xstep, int ystep);
 
-    uint16_t fixcolor(uint16_t color)
+    inline uint16_t fixcolor(uint16_t color)
     {
         return m_bRevBytes ? __builtin_bswap16(color) : color;
     }
@@ -173,6 +227,8 @@ private:
     uint16_t m_xoff {};
     uint16_t m_yoff {};
     uint16_t m_nPixelSize {};
+    uint16_t m_nStoredSize {};
+    uint8_t m_lut[16][3] {}; // display-format bytes for each palette index
     uint16_t m_nWidth {};
     uint16_t m_nHeight {};
     uint16_t m_nStride {};

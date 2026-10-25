@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <memory>
 
-#include "pico/critical_section.h"
+#include "pico/sync.h"
 
 class PowerMgr
 {

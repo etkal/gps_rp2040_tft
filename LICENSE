@@ -120,8 +120,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =============================================================================
 
-The ili9488 initialization and low-level access code was modeled after the
-Waveshare sample code, in which I found the following from the Waveshare team:
+The ili9488 initialization and low-level access code, including the xpt2046
+touch controller base code and basic calibration was modeled after Waveshare
+sample code, in which I found the following from the Waveshare team:
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documnetation files (the "Software"), to deal

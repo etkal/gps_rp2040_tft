@@ -52,6 +52,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 
 #include "hardware/gpio.h"
+#include "hardware/dma.h"
+
+#include "log.h" // Include logging utilities for LogInfo function
+
+#if !defined(DISPLAY_QUADRANTS)
+#define DISPLAY_QUADRANTS 4
+#endif
 
 #if !defined(DISPLAY_SPI_SPEED)
 #define DISPLAY_SPI_SPEED 20000000 // 20MHz default, override in CMakeLists.txt
@@ -89,6 +96,8 @@ ILI_TFT::ILI_TFT(spi_inst_t* spi, uint miso, uint mosi, uint sck, uint cs, uint 
     switch (DISPLAY_COLOUR_FORMAT)
     {
     case RGB666:
+    case RGB666_BYTE:
+    case RGB666_NIBBLE:
         m_colmod = 0x66; // 18-bit/pixel
         break;
     case RGB565:
@@ -104,10 +113,16 @@ void ILI_TFT::Initialize()
 {
     // Base initialization for all ILI TFT displays. Derived classes will implement the specific initialization
     // sequence for the display type.
-    spi_init(m_spi, DISPLAY_SPI_SPEED);
+    auto spiSpeed = spi_init(m_spi, DISPLAY_SPI_SPEED);
+    LogInfo("SPI initialized with speed: " + std::to_string(spiSpeed));
     gpio_set_function(m_miso, GPIO_FUNC_SPI);
     gpio_set_function(m_sck, GPIO_FUNC_SPI);
     gpio_set_function(m_mosi, GPIO_FUNC_SPI);
+    // Sharper edges and more drive for high SPI clock rates ###ET###
+    gpio_set_slew_rate(m_sck, GPIO_SLEW_RATE_FAST);
+    gpio_set_slew_rate(m_mosi, GPIO_SLEW_RATE_FAST);
+    gpio_set_drive_strength(m_sck, GPIO_DRIVE_STRENGTH_8MA);
+    gpio_set_drive_strength(m_mosi, GPIO_DRIVE_STRENGTH_8MA);
     gpio_init(m_cs);
     gpio_set_dir(m_cs, GPIO_OUT);
     gpio_put(m_cs, 1);
@@ -386,32 +401,22 @@ void ILI_TFT::Show(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
     }
     uint16_t fWidth = Framebuf::width(); // framebuf width
 
-    // This is the simplest, gets ~15fps.
-    // writeBlock(_x, _y, _x + _w - 1, _y + _h - 1);
-    // for (uint16_t iy = _y; iy < _y + _h; ++iy) // Draw line by line
-    // {
-    //     data(&pSrcData8[(iy * fWidth * 2) + _x], _w * 2);
-    // }
-
-    // This is more complicated, gets ~19fps for RGB565 while supporting RGB666.
-    static uint8_t tgtBuffer[_MAX_CHUNK_SIZE * sizeof(uint16_t)];
-    size_t bytesPerPixel = Framebuf::pixelSize();
-    if (bytesPerPixel == 0)
+    // Staging buffers are double-buffered: while DMA clocks out one chunk over SPI, the next
+    // chunk is being converted/copied into the other buffer.
+    static uint8_t tgtBuffer[2][_MAX_CHUNK_SIZE * sizeof(uint16_t)];
+    size_t bytesPerPixel = Framebuf::pixelSize();    // as sent to display
+    size_t storedPerPixel = Framebuf::storedPixelSize(); // as held in framebuf
+    if (bytesPerPixel == 0 || storedPerPixel == 0)
     {
         return;
     }
+    const bool palettized = Framebuf::isPalettized();
     size_t bytesPerLine = static_cast<size_t>(_w) * bytesPerPixel;
-    size_t chunkBufferBytes = sizeof(tgtBuffer);
+    size_t chunkBufferBytes = sizeof(tgtBuffer[0]);
 
-    // Fallback path if a single line does not fit in the staging buffer.
     if (bytesPerLine > chunkBufferBytes)
     {
-        writeBlock(disp_x, disp_y, disp_x + _w - 1, disp_y + _h - 1);
-        for (uint16_t iy = 0; iy < _h; ++iy)
-        {
-            size_t nSrcOffset = (static_cast<size_t>(_y + iy) * fWidth * bytesPerPixel) + (static_cast<size_t>(_x) * bytesPerPixel);
-            sendFramebufferData(&pSrcData8[nSrcOffset], bytesPerLine);
-        }
+        std::cout << "Display line too wide for staging buffer" << std::endl;
         return;
     }
 
@@ -420,29 +425,73 @@ void ILI_TFT::Show(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
     {
         linesPerChunk = 1;
     }
-    uint16_t numChunks = _h / linesPerChunk;
-    uint16_t linesLeftover = _h - numChunks * linesPerChunk;
+
+    static int dmaChan = -1;
+    if (dmaChan < 0)
+    {
+        dmaChan = dma_claim_unused_channel(false);
+    }
 
     // Tell the display where we are going to write the data
     writeBlock(disp_x, disp_y, disp_x + _w - 1, disp_y + _h - 1);
-    for (uint16_t nChunk = 0; nChunk < numChunks; ++nChunk)
+
+    cs_select();
+    data_select();
+
+    dma_channel_config cfg;
+    if (dmaChan >= 0)
     {
-        for (uint16_t iy = 0; iy < linesPerChunk; ++iy)
+        cfg = dma_channel_get_default_config(dmaChan);
+        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_8);
+        channel_config_set_dreq(&cfg, spi_get_dreq(m_spi, true));
+        channel_config_set_read_increment(&cfg, true);
+        channel_config_set_write_increment(&cfg, false);
+    }
+
+    int cur = 0;
+    for (uint16_t iy = 0; iy < _h; iy += linesPerChunk)
+    {
+        uint16_t lines = MIN(linesPerChunk, static_cast<uint16_t>(_h - iy));
+        uint8_t* dst = tgtBuffer[cur];
+        for (uint16_t l = 0; l < lines; ++l)
         {
-            size_t nSrcOffset = (static_cast<size_t>(_y + (iy + nChunk * linesPerChunk)) * fWidth * bytesPerPixel) +
-                                (static_cast<size_t>(_x) * bytesPerPixel);
-            memcpy(tgtBuffer + (static_cast<size_t>(iy) * bytesPerLine), &pSrcData8[nSrcOffset], bytesPerLine);
+            size_t nSrcOffset = (static_cast<size_t>(_y + iy + l) * fWidth + _x) * storedPerPixel;
+            if (palettized)
+            {
+                Framebuf::expandPixels(pSrcData8, static_cast<size_t>(_y + iy + l) * fWidth + _x, dst + static_cast<size_t>(l) * bytesPerLine, _w);
+            }
+            else
+            {
+                memcpy(dst + static_cast<size_t>(l) * bytesPerLine, &pSrcData8[nSrcOffset], bytesPerLine);
+            }
         }
-        sendFramebufferData(tgtBuffer, static_cast<size_t>(linesPerChunk) * bytesPerLine);
+        size_t nBytes = static_cast<size_t>(lines) * bytesPerLine;
+        if (dmaChan >= 0)
+        {
+            dma_channel_wait_for_finish_blocking(dmaChan); // previous chunk (other buffer)
+            dma_channel_configure(dmaChan, &cfg, &spi_get_hw(m_spi)->dr, dst, nBytes, true);
+            cur ^= 1;
+        }
+        else
+        {
+            spi_write_blocking(m_spi, dst, nBytes);
+        }
     }
-    // Leftover lines
-    for (uint16_t iy = 0; iy < linesLeftover; ++iy)
+    if (dmaChan >= 0)
     {
-        size_t nSrcOffset = (static_cast<size_t>(_y + (iy + numChunks * linesPerChunk)) * fWidth * bytesPerPixel) +
-                            (static_cast<size_t>(_x) * bytesPerPixel);
-        memcpy(tgtBuffer + (static_cast<size_t>(iy) * bytesPerLine), &pSrcData8[nSrcOffset], bytesPerLine);
+        dma_channel_wait_for_finish_blocking(dmaChan);
+        while (spi_get_hw(m_spi)->sr & SPI_SSPSR_BSY_BITS)
+        {
+            tight_loop_contents();
+        }
+        // Clear any RX overrun/FIFO residue from TX-only transfer
+        spi_get_hw(m_spi)->icr = SPI_SSPICR_RORIC_BITS;
+        while (spi_is_readable(m_spi))
+        {
+            (void)spi_get_hw(m_spi)->dr;
+        }
     }
-    sendFramebufferData(tgtBuffer, static_cast<size_t>(linesLeftover) * bytesPerLine);
+    cs_deselect();
 }
 
 void ILI_TFT::writeByte(uint8_t data)

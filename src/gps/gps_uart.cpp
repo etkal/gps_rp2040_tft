@@ -40,6 +40,7 @@ GPS_UART* GPS_UART::sm_pGPS = nullptr;
 GPS_UART::GPS_UART()
     : GPS::GPS()
 {
+    queue_init(&m_qSentences, GPS_BUFSIZE, GPS_QUEUE_SIZE); // Initialize the queue for received sentences
 }
 
 GPS_UART::~GPS_UART()
@@ -101,9 +102,6 @@ void GPS_UART::Initialize()
     // Register the callback to handle validated sentences processed by the base class
     sm_pGPS = this;
     GPS::SetSentenceCallback(this, sentenceCB);
-
-    // Initialize the queue for received sentences. This uses the SDK queue_t structure for thread-safe access.
-    queue_init(&m_qSentences, GPS_BUFSIZE, GPS_QUEUE_SIZE); // Initialize the queue for received sentences
 
     if (m_pUartIn == nullptr)
     {

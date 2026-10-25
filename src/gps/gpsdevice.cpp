@@ -40,23 +40,35 @@ namespace
     constexpr double pi = 3.14159265359;
 } // namespace
 
-GPSDevice::GPSDevice(Display::Shared spDisplay, GPS::Shared spGPS, Button::Shared spButton)
+GPSDevice::GPSDevice(Display::Shared spDisplay, GPS::Shared spGPS, Button::Shared spButton, Touch::Shared spTouch)
     : m_spDisplay(spDisplay),
       m_spGPS(spGPS),
-      m_spButton(spButton)
+      m_spButton(spButton),
+      m_spTouch(spTouch)
 {
     if (!m_spDisplay || !m_spGPS)
     {
         panic("GPSDevice constructor: One or more required pointers are null");
     }
     critical_section_init(&m_CallbackCs);
+    queue_init(&m_qIncomingGPSData, sizeof(GPSData::Shared*), 10); // Initialize the queue with a capacity of 10
 }
 
 void GPSDevice::Initialize()
 {
-    queue_init(&m_qIncomingGPSData, sizeof(GPSData::Shared*), 10); // Initialize the queue with a capacity of 10
+	// Wait for the GPS to initialize since we will be calling its methods
+    while (!m_spGPS->IsInitialized())
+    {
+        sleep_ms(10);
+    }
 
     m_spDisplay->Initialize();
+
+    if (m_spTouch)
+    {
+        // Initialized here so the touch interrupt and SPI use are on the same core as the display
+        m_spTouch->Initialize(m_spDisplay->Width(), m_spDisplay->Height());
+    }
 
     showSplashScreen();
 
@@ -129,7 +141,18 @@ void GPSDevice::DoWork()
     }
     if (!m_bExit)
     {
-        if (handleButtonEvent() && m_spLastGPSData)
+        bool bUpdate = handleButtonEvent();
+        if (m_spTouch)
+        {
+            // Sample touch only between display updates, since the SPI bus is shared
+            m_spTouch->DoWork();
+            TouchEvent touchEvent;
+            while (m_spTouch->GetEvent(touchEvent))
+            {
+                bUpdate |= handleTouchEvent(touchEvent);
+            }
+        }
+        if (bUpdate && m_spLastGPSData)
         {
             // Redraw immediately with the last known data rather than waiting for the next GPS update
             updateUI(m_spLastGPSData);
@@ -149,7 +172,7 @@ void GPSDevice::DoWork()
             critical_section_exit(&m_CallbackCs);
             m_spLastGPSData = spGPSData;
             updateUI(spGPSData);
-            m_spIdleTimer->Start(5000); // Reset the idle timer
+            m_spIdleTimer->Start(2500); // Reset the idle timer
         }
         if (m_bShowWaitingForGPS)
         {
@@ -343,10 +366,8 @@ void GPSDevice::drawCircleSat(uint gridCenterX,
     Ellipse(x, y, satRadius, satRadius, color);           // Draw circle without fill
 }
 
-void GPSDevice::drawClock(uint x, uint y, uint radius, std::string strTime)
+void GPSDevice::drawClock(uint xCenter, uint yCenter, uint radius, std::string strTime)
 {
-    uint xCenter = x + radius;
-    uint yCenter = y + radius;
     uint nHour = atoi(strTime.substr(0, 2).c_str());
     const float gmtOffset = TimeMgr::TimeZoneOffsetHours();
     float hour = (float)(nHour % 12) + gmtOffset;
@@ -445,7 +466,7 @@ void GPSDevice::drawBarGraph(const GPSData::Shared& spGPSData, uint x, uint y, u
     {
         auto oSat = oEntry.second;
         uint rssi = oSat.m_rssi;
-        uint barHeight = (int)((double)barHeightMax * (double)rssi / 64);
+        uint barHeight = (int)(0.9 * (double)barHeightMax * (double)rssi / 64);
         uint baseLineY = y + barHeightMax;
         m_spDisplay->HLine(barPosX, baseLineY, barDelta, COLOUR_WHITE);
         uint nSat = oSat.m_num;
