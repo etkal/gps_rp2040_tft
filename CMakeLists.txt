@@ -14,7 +14,7 @@ endif()
 # ====================================================================================
 cmake_minimum_required(VERSION 3.24)
 
-add_compile_definitions(PRODUCT_SPLASH_STRING="ET GPS TFT v1.1")
+add_compile_definitions(PRODUCT_SPLASH_STRING="ET GPS TFT v1.2")
 
 # Set the board type for pin and LED decisions
 #set(PICO_BOARD pico)
