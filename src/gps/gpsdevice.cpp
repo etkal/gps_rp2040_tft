@@ -41,7 +41,7 @@ namespace
 } // namespace
 
 GPSDevice::GPSDevice(Display::Shared spDisplay, GPS::Shared spGPS, Button::Shared spButton, Touch::Shared spTouch)
-    : m_spDisplay(spDisplay),
+    : Screen(spDisplay),
       m_spGPS(spGPS),
       m_spButton(spButton),
       m_spTouch(spTouch)
@@ -67,14 +67,14 @@ void GPSDevice::Initialize()
     if (m_spTouch)
     {
         // Initialized here so the touch interrupt and SPI use are on the same core as the display
-        m_spTouch->Initialize(m_spDisplay->Width(), m_spDisplay->Height());
+        m_spTouch->Initialize(Width(), Height());
     }
 
     showSplashScreen();
 
     // Initialize display with desired font
     auto nFontSize = m_spDisplay->RecommendedFontSize();
-    m_spDisplay->SetFont(get_recommended_font(nFontSize));
+    SetFont(get_recommended_font(nFontSize));
 
     m_bShowWaitingForGPS = true;
 
@@ -319,12 +319,12 @@ void GPSDevice::drawSatGrid(const GPSData::Shared& spGPSData, uint xCenter, uint
 {
     for (uint i = 1; i <= nRings; ++i)
     {
-        m_spDisplay->Ellipse(xCenter, yCenter, radius * i / nRings, radius * i / nRings, m_foregroundColour);
+        Ellipse(xCenter, yCenter, radius * i / nRings, radius * i / nRings, m_foregroundColour);
     }
 
-    m_spDisplay->VLine(xCenter, yCenter - radius - 2, 2 * radius + 5, m_foregroundColour);
-    m_spDisplay->HLine(xCenter - radius - 2, yCenter, 2 * radius + 5, m_foregroundColour);
-    m_spDisplay->Text("^", xCenter - getCharWidth() / 2 + 1, yCenter - radius - getCharHeight() / 2, m_northColour);
+    VLine(xCenter, yCenter - radius - 2, 2 * radius + 5, m_foregroundColour);
+    HLine(xCenter - radius - 2, yCenter, 2 * radius + 5, m_foregroundColour);
+    Text("^", xCenter - getCharWidth() / 2 + 1, yCenter - radius - getCharHeight() / 2, m_northColour);
 
     int satRadius = m_satIconRadius / 2;
     if (!spGPSData->strLatitude.empty())
@@ -468,7 +468,7 @@ void GPSDevice::drawBarGraph(const GPSData::Shared& spGPSData, uint x, uint y, u
         uint rssi = oSat.m_rssi;
         uint barHeight = (int)(0.9 * (double)barHeightMax * (double)rssi / 64);
         uint baseLineY = y + barHeightMax;
-        m_spDisplay->HLine(barPosX, baseLineY, barDelta, COLOUR_WHITE);
+        HLine(barPosX, baseLineY, barDelta, COLOUR_WHITE);
         uint nSat = oSat.m_num;
 
         std::stringstream oss;
@@ -478,16 +478,16 @@ void GPSDevice::drawBarGraph(const GPSData::Shared& spGPSData, uint x, uint y, u
         uint charPosX = bNarrow ? barPosX + (barDelta - (2 * charWidth)) / 2 : barPosX + (barDelta - charWidth) / 2;
         if (bNarrow)
         {
-            m_spDisplay->Text(strSatNum.c_str(), charPosX, baseLineY + 2, COLOUR_WHITE, *pFont);
+            Text(strSatNum.c_str(), charPosX, baseLineY + 2, COLOUR_WHITE, *pFont);
         }
         else
         {
-            m_spDisplay->Text(strSatNum.substr(0, 1).c_str(), charPosX, baseLineY + 2, COLOUR_WHITE);
-            m_spDisplay->Text(strSatNum.substr(1, 1).c_str(), charPosX, baseLineY + charHeight, COLOUR_WHITE);
+            Text(strSatNum.substr(0, 1).c_str(), charPosX, baseLineY + 2, COLOUR_WHITE);
+            Text(strSatNum.substr(1, 1).c_str(), charPosX, baseLineY + charHeight, COLOUR_WHITE);
         }
         if (barHeight > 0)
         {
-            m_spDisplay->Rect(barPosX + 1, baseLineY - barHeight + 1, barWidth, barHeight, COLOUR_WHITE);
+            Rect(barPosX + 1, baseLineY - barHeight + 1, barWidth, barHeight, COLOUR_WHITE);
         }
         for (auto nSat : spGPSData->vUsedList)
         {
@@ -496,7 +496,7 @@ void GPSDevice::drawBarGraph(const GPSData::Shared& spGPSData, uint x, uint y, u
                 if (barHeight > 0)
                 {
                     // draw inner filled rectangle to indicate used satellite
-                    m_spDisplay->Rect(barPosX + 2, baseLineY - barHeight + 2, barWidth - 2, barHeight - 2, m_barsColour, true);
+                    Rect(barPosX + 2, baseLineY - barHeight + 2, barWidth - 2, barHeight - 2, m_barsColour, true);
                 }
                 break;
             }
